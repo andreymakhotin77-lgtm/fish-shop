@@ -1,0 +1,12 @@
+{
+  "name": "lavka-vkusa-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Сервер заказов магазина Лавка Вкуса",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}
