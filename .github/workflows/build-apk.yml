@@ -29,6 +29,43 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Decrypt signing key
+        shell: bash
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if [ "${#SIGNING_PASSWORD}" -lt 32 ]; then
+            echo "SIGNING_PASSWORD is missing or too short."
+            exit 1
+          fi
+
+          test -s signing/lavka-release.p12.gpg
+
+          PRIVATE_DIR="$RUNNER_TEMP/lavka-signing"
+          mkdir -p "$PRIVATE_DIR"
+
+          printf '%s' "$SIGNING_PASSWORD" | gpg \
+            --batch \
+            --yes \
+            --pinentry-mode loopback \
+            --passphrase-fd 0 \
+            --output "$PRIVATE_DIR/lavka-release.p12" \
+            --decrypt signing/lavka-release.p12.gpg
+
+          keytool -list \
+            -keystore "$PRIVATE_DIR/lavka-release.p12" \
+            -storetype PKCS12 \
+            -storepass:env SIGNING_PASSWORD \
+            -alias lavka > /dev/null
+
+          echo "SIGNING_KEYSTORE=$PRIVATE_DIR/lavka-release.p12" \
+            >> "$GITHUB_ENV"
+
+          echo "Signing key is ready."
+
       - name: Create Android project
         shell: bash
         run: |
@@ -74,6 +111,10 @@ jobs:
               id 'com.android.application'
           }
 
+          def buildNumber = (
+              System.getenv('GITHUB_RUN_NUMBER') ?: '1'
+          ).toInteger()
+
           android {
               namespace 'ru.makeevka.fishshop'
               compileSdk 35
@@ -82,8 +123,32 @@ jobs:
                   applicationId 'ru.makeevka.fishshop'
                   minSdk 26
                   targetSdk 34
-                  versionCode 4
-                  versionName '0.4-test'
+                  versionCode 100 + buildNumber
+                  versionName "0.5-test.${buildNumber}"
+              }
+
+              signingConfigs {
+                  release {
+                      storeFile file(
+                          System.getenv('SIGNING_KEYSTORE')
+                      )
+                      storePassword System.getenv(
+                          'SIGNING_PASSWORD'
+                      )
+                      keyAlias 'lavka'
+                      keyPassword System.getenv(
+                          'SIGNING_PASSWORD'
+                      )
+                      storeType 'PKCS12'
+                  }
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                      minifyEnabled false
+                      debuggable false
+                  }
               }
 
               compileOptions {
@@ -128,19 +193,15 @@ jobs:
       - name: Connect store application
         shell: bash
         run: |
+          set -euo pipefail
+
           test -s android/MainActivity.java
           test -s android/StoreActivity.java
           test -s android/ShopApi.java
+          test -s android/ProductArtwork.java
 
-          cp android/MainActivity.java \
-            app/src/main/java/ru/makeevka/fishshop/MainActivity.java
-
-          cp android/StoreActivity.java \
-            app/src/main/java/ru/makeevka/fishshop/StoreActivity.java
-
-                    cp android/*.java \
+          cp android/*.java \
             app/src/main/java/ru/makeevka/fishshop/
-
 
       - name: Create black and gold icon
         shell: bash
@@ -180,13 +241,21 @@ jobs:
           </adaptive-icon>
           EOF
 
-      - name: Build APK
-        run: gradle --no-daemon assembleDebug
+      - name: Build signed APK
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
 
       - name: Save APK
         uses: actions/upload-artifact@v4
         with:
           name: fish-shop-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 7
+
+      - name: Remove decrypted signing key
+        if: always()
+        shell: bash
+        run: |
+          rm -rf "$RUNNER_TEMP/lavka-signing"
