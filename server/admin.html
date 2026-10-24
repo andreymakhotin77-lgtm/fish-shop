@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#121212">
+  <meta name="referrer" content="no-referrer">
+  <title>Лавка Вкуса — управление</title>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #121212;
+      --card: #202020;
+      --field: #161616;
+      --gold: #d4af37;
+      --text: #f5f0e6;
+      --muted: #bcb6a9;
+      --border: #454033;
+      --danger: #ffb4ab;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      line-height: 1.5;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    header {
+      border-bottom: 1px solid var(--border);
+      background: #171717;
+    }
+
+    .header-inner {
+      max-width: 1000px;
+      margin: auto;
+      padding: 20px 16px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo {
+      width: 58px;
+      height: 58px;
+      flex-shrink: 0;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--gold);
+      border-radius: 17px;
+      color: var(--gold);
+      font-family: Georgia, serif;
+      font-size: 27px;
+      background: #0c0c0c;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 23px;
+      color: var(--gold);
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 21px;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      overflow-wrap: anywhere;
+    }
+
+    p {
+      margin: 8px 0;
+    }
+
+    main {
+      max-width: 1000px;
+      margin: auto;
+      padding: 20px 16px 48px;
+    }
+
+    .subtitle, .muted {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .panel, .card {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--card);
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+
+    .login {
+      max-width: 500px;
+      margin: 30px auto;
+    }
+
+    .notice {
+      border-left: 3px solid var(--gold);
+      background: #242015;
+      padding: 12px 14px;
+      border-radius: 8px;
+      margin-bottom: 18px;
+      font-size: 14px;
+    }
+
+    label {
+      display: block;
+      font-size: 14px;
+      margin: 13px 0 6px;
+    }
+
+    input, textarea, select {
+      width: 100%;
+      min-height: 46px;
+      background: var(--field);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 11px;
+      color: var(--text);
+      font: inherit;
+      font-size: 16px;
+    }
+
+    input:focus, textarea:focus, select:focus {
+      outline: 2px solid var(--gold);
+      outline-offset: 1px;
+    }
+
+    input[readonly] {
+      color: var(--muted);
+    }
+
+    textarea {
+      min-height: 96px;
+      resize: vertical;
+    }
+
+    button {
+      min-height: 44px;
+      border: 1px solid var(--gold);
+      border-radius: 11px;
+      background: var(--gold);
+      color: #121212;
+      padding: 10px 16px;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: transparent;
+      color: var(--gold);
+    }
+
+    button:disabled {
+      opacity: .5;
+      cursor: wait;
+    }
+
+    .wide {
+      width: 100%;
+      margin-top: 18px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tabs button {
+      background: transparent;
+      color: var(--gold);
+    }
+
+    .tabs button.active {
+      background: var(--gold);
+      color: #121212;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 14px;
+    }
+
+    .grid .card {
+      margin: 0;
+    }
+
+    .price {
+      font-size: 22px;
+      color: var(--gold);
+      font-weight: 700;
+      margin: 10px 0;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 9px;
+      border-radius: 7px;
+      font-size: 13px;
+      color: var(--gold);
+      background: #302a18;
+    }
+
+    .badge.off {
+      color: var(--danger);
+      background: #38211f;
+    }
+
+    .product-image {
+      width: 100%;
+      height: 170px;
+      object-fit: cover;
+      border-radius: 11px;
+      margin-bottom: 12px;
+      background: var(--field);
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .check {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 16px;
+    }
+
+    .check input {
+      width: 22px;
+      min-height: 22px;
+      accent-color: var(--gold);
+    }
+
+    .two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .order-id {
+      color: var(--gold);
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+
+    .order-items {
+      padding-left: 22px;
+    }
+
+    .order-items li {
+      margin: 7px 0;
+    }
+
+    .status-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+
+    .status-row select {
+      flex: 1;
+      min-width: 180px;
+    }
+
+    .pagination {
+      margin-top: 20px;
+      justify-content: center;
+    }
+
+    #message {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    #message.error {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    a {
+      color: var(--gold);
+    }
+
+    @media (max-width: 420px) {
+      .two {
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+
+      h1 {
+        font-size: 20px;
+      }
+
+      .panel, .card {
+        padding: 15px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="logo">ЛВ</div>
+      <div>
+        <h1>Лавка Вкуса</h1>
+        <div class="subtitle">Панель продавца</div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div id="message"
+         class="notice"
+         role="status"
+         aria-live="polite"
+         hidden></div>
+
+    <section id="loginPanel" class="panel login">
+      <h2>Вход для продавца</h2>
+      <p class="muted">
+        Введите значение ADMIN_TOKEN, которое вы сохранили
+        в настройках Render.
+      </p>
+
+      <form id="loginForm">
+        <label for="adminKey">Секретный ключ</label>
+        <input id="adminKey"
+               type="password"
+               autocomplete="off"
+               autocapitalize="none"
+               spellcheck="false"
+               minlength="32"
+               required>
+
+        <button id="loginButton" class="wide" type="submit">
+          Войти
+        </button>
+      </form>
+
+      <p class="muted">
+        Панель не сохраняет ключ в локальное хранилище браузера.
+        После обновления страницы потребуется войти снова.
+      </p>
+    </section>
+
+    <div id="application" hidden>
+      <div class="toolbar">
+        <nav class="tabs" aria-label="Разделы управления">
+          <button id="productsTab" class="active" type="button">
+            Товары
+          </button>
+          <button id="ordersTab" type="button">
+            Заказы
+          </button>
+        </nav>
+
+        <button id="logoutButton"
+                class="secondary"
+                type="button">
+          Выйти
+        </button>
+      </div>
+
+      <section id="productsSection">
+        <div class="notice">
+          Изменения сохраняются в базе магазина.
+          Установленная старая версия Android-приложения пока
+          не загружает каталог из базы. Подключим её следующим этапом.
+        </div>
+
+        <div class="toolbar">
+          <h2>Каталог магазина</h2>
+          <div class="row">
+            <button id="newProductButton" type="button">
+              + Добавить товар
+            </button>
+            <button id="refreshProductsButton"
+                    class="secondary"
+                    type="button">
+              Обновить
+            </button>
+          </div>
+        </div>
+
+        <section id="productEditor" class="panel" hidden>
+          <h2 id="editorTitle">Новый товар</h2>
+
+          <form id="productForm">
+            <div id="productCodeBlock" hidden>
+              <label for="productCode">Код товара</label>
+              <input id="productCode" type="text" readonly>
+            </div>
+
+            <label for="productName">Название товара</label>
+            <input id="productName"
+                   type="text"
+                   minlength="2"
+                   maxlength="120"
+                   required>
+
+            <div class="two">
+              <div>
+                <label for="productCategory">Категория</label>
+                <input id="productCategory"
+                       type="text"
+                       maxlength="80"
+                       placeholder="Например: Рыба"
+                       required>
+              </div>
+              <div>
+                <label for="productUnit">Единица продажи</label>
+                <select id="productUnit">
+                  <option value="кг">Килограмм — кг</option>
+                  <option value="шт">Штука — шт</option>
+                  <option value="уп">Упаковка — уп</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="two">
+              <div>
+                <label for="productPrice">
+                  Цена за единицу, ₽
+                </label>
+                <input id="productPrice"
+                       type="number"
+                       min="1"
+                       max="1000000"
+                       step="1"
+                       inputmode="numeric"
+                       required>
+              </div>
+              <div>
+                <label for="productSort">
+                  Порядок в каталоге
+                </label>
+                <input id="productSort"
+                       type="number"
+                       min="-100000"
+                       max="100000"
+                       step="1"
+                       value="0"
+                       required>
+              </div>
+            </div>
+
+            <label for="productDescription">Описание</label>
+            <textarea id="productDescription"
+                      maxlength="2000"
+                      placeholder="Особенности товара, состав, хранение"></textarea>
+
+            <label for="productImage">Ссылка на фотографию</label>
+            <input id="productImage"
+                   type="url"
+                   maxlength="1500"
+                   placeholder="https://..."
+                   autocapitalize="none"
+                   spellcheck="false">
+
+            <p class="muted">
+              Пока поддерживается прямая HTTPS-ссылка на изображение.
+              Загрузка фото с телефона ещё не добавлена.
+              Поле можно оставить пустым.
+            </p>
+
+            <label class="check">
+              <input id="productAvailable"
+                     type="checkbox"
+                     checked>
+              <span>Товар в наличии</span>
+            </label>
+
+            <p class="muted">
+              Чтобы временно убрать товар из нового каталога,
+              снимите отметку «Товар в наличии».
+            </p>
+
+            <div class="row" style="margin-top:18px">
+              <button id="saveProductButton" type="submit">
+                Сохранить товар
+              </button>
+              <button id="cancelEditButton"
+                      class="secondary"
+                      type="button">
+                Отмена
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <p id="productsCount" class="muted"></p>
+        <div id="productsList" class="grid"></div>
+      </section>
+
+      <section id="ordersSection" hidden>
+        <div class="toolbar">
+          <h2>Заказы покупателей</h2>
+          <button id="refreshOrdersButton"
+                  class="secondary"
+                  type="button">
+            Обновить заказы
+          </button>
+        </div>
+
+        <div class="notice">
+          Здесь видны заказы, сохранённые после подключения базы.
+          Старые заказы из Telegram автоматически сюда не переносятся.
+          Статусы пока доступны только продавцу.
+        </div>
+
+        <div id="ordersList"></div>
+
+        <div class="row pagination">
+          <button id="previousPageButton"
+                  class="secondary"
+                  type="button">
+            Назад
+          </button>
+
+          <span id="pageLabel"></span>
+
+          <button id="nextPageButton"
+                  class="secondary"
+                  type="button">
+            Далее
+          </button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    "use strict";
+
+    const $ = (id) => document.getElementById(id);
+
+    let token = "";
+    let products = [];
+    let editingId = null;
+    let orderPage = 1;
+    let sessionVersion = 0;
+
+    const money = new Intl.NumberFormat("ru-RU", {
+      maximumFractionDigits: 0
+    });
+
+    const statusNames = {
+      new: "Новый",
+      confirmed: "Подтверждён",
+      preparing: "Собирается",
+      delivering: "В доставке",
+      ready: "Готов к самовывозу",
+      completed: "Выполнен",
+      cancelled: "Отменён"
+    };
+
+    const telegramNames = {
+      sent: "Уведомление отправлено в Telegram",
+      pending: "Отправка уведомления не завершена",
+      unconfirmed: "Нет подтверждения Telegram — проверьте заказ",
+      not_configured: "Telegram не настроен"
+    };
+
+    function showMessage(text, error = false) {
+      const box = $("message");
+      box.textContent = text;
+      box.classList.toggle("error", error);
+      box.hidden = false;
+    }
+
+    function clearMessage() {
+      $("message").hidden = true;
+      $("message").textContent = "";
+    }
+
+    function reportError(error) {
+      if (error.code !== "STALE_SESSION") {
+        showMessage(error.message || "Не удалось выполнить действие.", true);
+      }
+    }
+
+    function element(tag, text, className) {
+      const node = document.createElement(tag);
+      if (text !== undefined) node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    }
+
+    function rub(value) {
+      return money.format(Number(value) || 0) + " ₽";
+    }
+
+    function logout() {
+      sessionVersion += 1;
+      token = "";
+      products = [];
+      editingId = null;
+
+      $("adminKey").value = "";
+      $("productsList").replaceChildren();
+      $("ordersList").replaceChildren();
+      $("productForm").reset();
+      $("productEditor").hidden = true;
+      $("application").hidden = true;
+      $("loginPanel").hidden = false;
+      clearMessage();
+    }
+
+    async function api(route, options = {}) {
+      const currentSession = sessionVersion;
+      const headers = {
+        Authorization: "Bearer " + token
+      };
+
+      const request = {
+        method: options.method || "GET",
+        headers,
+        credentials: "omit",
+        cache: "no-store",
+        signal: AbortSignal.timeout(120000)
+      };
+
+      if (options.body !== undefined) {
+        headers["Content-Type"] = "application/json";
+        request.body = JSON.stringify(options.body);
+      }
+
+      let response;
+
+      try {
+        response = await fetch(route, request);
+      } catch {
+        if (currentSession !== sessionVersion) {
+          const error = new Error();
+          error.code = "STALE_SESSION";
+          throw error;
+        }
+
+        throw new Error(
+          "Нет ответа сервера. Проверьте интернет. " +
+          "После простоя сервер может запускаться около минуты."
+        );
+      }
+
+      if (currentSession !== sessionVersion) {
+        const error = new Error();
+        error.code = "STALE_SESSION";
+        throw error;
+      }
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          logout();
+        }
+
+        throw new Error(
+          data.error || "Ошибка сервера: " + response.status
+        );
+      }
+
+      return data;
+    }
+
+    function setTab(tab) {
+      const isProducts = tab === "products";
+
+      $("productsSection").hidden = !isProducts;
+      $("ordersSection").hidden = isProducts;
+      $("productsTab").classList.toggle("active", isProducts);
+      $("ordersTab").classList.toggle("active", !isProducts);
+    }
+
+    function openEditor(product = null) {
+      editingId = product ? product.id : null;
+
+      $("productForm").reset();
+      $("editorTitle").textContent =
+        product ? "Редактирование товара" : "Новый товар";
+
+      $("productCodeBlock").hidden = !product;
+      $("productCode").value = product ? product.id : "";
+      $("productName").value = product ? product.name : "";
+      $("productCategory").value =
+        product ? product.category : "Рыба и морепродукты";
+      $("productPrice").value = product ? product.priceRub : "";
+      $("productSort").value = product ? product.sortOrder : 0;
+      $("productDescription").value =
+        product ? product.description : "";
+      $("productImage").value = product ? product.imageUrl : "";
+      $("productAvailable").checked =
+        product ? product.available : true;
+
+      const unitSelect = $("productUnit");
+
+      while (unitSelect.options.length > 3) {
+        unitSelect.remove(3);
+      }
+
+      const unit = product ? product.unit : "кг";
+
+      if (![...unitSelect.options].some((option) => option.value === unit)) {
+        unitSelect.add(new Option(unit, unit));
+      }
+
+      unitSelect.value = unit;
+
+      $("productEditor").hidden = false;
+      $("productEditor").scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }
+
+    function renderProducts() {
+      const list = $("productsList");
+      list.replaceChildren();
+
+      $("productsCount").textContent =
+        "Всего товаров: " + products.length;
+
+      if (!products.length) {
+        list.append(element("p", "В каталоге пока нет товаров.", "muted"));
+        return;
+      }
+
+      for (const product of products) {
+        const card = element("article", undefined, "card");
+
+        if (product.imageUrl) {
+          try {
+            const url = new URL(product.imageUrl);
+
+            if (url.protocol === "https:") {
+              const image = document.createElement("img");
+              image.src = url.href;
+              image.alt = product.name;
+              image.className = "product-image";
+              image.loading = "lazy";
+              image.referrerPolicy = "no-referrer";
+
+              image.addEventListener("error", () => {
+                image.remove();
+              });
+
+              card.append(image);
+            }
+          } catch {
+            // Некорректная ссылка не мешает показать товар.
+          }
+        }
+
+        card.append(
+          element("div", product.category, "muted"),
+          element("h3", product.name),
+          element(
+            "div",
+            rub(product.priceRub) + " / " + product.unit,
+            "price"
+          ),
+          element(
+            "span",
+            product.available ? "В наличии" : "Нет в наличии",
+            product.available ? "badge" : "badge off"
+          )
+        );
+
+        if (product.description) {
+          card.append(element("p", product.description, "muted"));
+        }
+
+        const button = element(
+          "button",
+          "Редактировать",
+          "secondary wide"
+        );
+
+        button.type = "button";
+        button.addEventListener("click", () => openEditor(product));
+        card.append(button);
+        list.append(card);
+      }
+    }
+
+    async function loadProducts() {
+      const data = await api("/api/admin/products");
+      products = data.products;
+      renderProducts();
+    }
+
+    function renderOrders(orders) {
+      const list = $("ordersList");
+      list.replaceChildren();
+
+      if (!orders.length) {
+        list.append(
+          element("p", "На этой странице заказов пока нет.", "muted")
+        );
+      }
+
+      for (const order of orders) {
+        const card = element("article", undefined, "card");
+
+        const date = new Date(order.createdAt).toLocaleString("ru-RU");
+
+        card.append(
+          element("div", order.id, "order-id"),
+          element("p", date, "muted"),
+          element("h3", order.name)
+        );
+
+        const phone = element("a", order.phone);
+        phone.href = "tel:" + order.phone;
+        card.append(phone);
+
+        card.append(
+          element(
+            "p",
+            order.fulfillment === "pickup"
+              ? "Самовывоз: г. Макеевка, ул. Плеханова, 1в"
+              : "Доставка: " + order.address
+          )
+        );
+
+        const items = element("ul", undefined, "order-items");
+
+        for (const item of order.items) {
+          items.append(
+            element(
+              "li",
+              item.name + " — " +
+              item.quantity + " " + item.unit + " × " +
+              rub(item.priceRub) + " = " + rub(item.totalRub)
+            )
+          );
+        }
+
+        card.append(items);
+        card.append(
+          element("div", "Товары: " + rub(order.totalRub), "price")
+        );
+
+        if (order.fulfillment === "delivery") {
+          card.append(
+            element(
+              "p",
+              order.totalRub >= 2000
+                ? "Бесплатная доставка по Макеевке, Донецку и " +
+                  "Харцызску. Другие города — по согласованию."
+                : "Стоимость доставки необходимо согласовать.",
+              "muted"
+            )
+          );
+        }
+
+        if (order.comment) {
+          card.append(element("p", "Комментарий: " + order.comment));
+        }
+
+        card.append(
+          element(
+            "p",
+            telegramNames[order.telegramStatus] ||
+              "Статус Telegram: " + order.telegramStatus,
+            "muted"
+          )
+        );
+
+        const controls = element("div", undefined, "status-row");
+        const select = document.createElement("select");
+        select.setAttribute("aria-label", "Статус заказа " + order.id);
+
+        for (const [value, name] of Object.entries(statusNames)) {
+          select.add(new Option(name, value));
+        }
+
+        select.value = order.status;
+
+        const save = element("button", "Сохранить статус");
+        save.type = "button";
+
+        save.addEventListener("click", async () => {
+          clearMessage();
+          save.disabled = true;
+          select.disabled = true;
+
+          try {
+            const result = await api(
+              "/api/admin/orders/" +
+                encodeURIComponent(order.id) +
+                "/status",
+              {
+                method: "PATCH",
+                body: { status: select.value }
+              }
+            );
+
+            order.status = result.order.status;
+            select.value = order.status;
+
+            showMessage(
+              "Статус заказа сохранён: " + statusNames[order.status]
+            );
+          } catch (error) {
+            select.value = order.status;
+            reportError(error);
+          } finally {
+            save.disabled = false;
+            select.disabled = false;
+          }
+        });
+
+        controls.append(select, save);
+        card.append(controls);
+        list.append(card);
+      }
+
+      $("pageLabel").textContent = "Страница " + orderPage;
+      $("previousPageButton").disabled = orderPage <= 1;
+      $("nextPageButton").disabled = orders.length < 50;
+    }
+
+    async function loadOrders() {
+      const data = await api("/api/admin/orders?page=" + orderPage);
+      renderOrders(data.orders);
+    }
+
+    async function withButton(button, action) {
+      button.disabled = true;
+
+      try {
+        clearMessage();
+        await action();
+      } catch (error) {
+        reportError(error);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    $("loginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      await withButton($("loginButton"), async () => {
+        token = $("adminKey").value.trim();
+
+        if (token.length < 32) {
+          token = "";
+          throw new Error("Ключ должен содержать не менее 32 символов.");
+        }
+
+        try {
+          await loadProducts();
+        } catch (error) {
+          token = "";
+          throw error;
+        }
+
+        $("adminKey").value = "";
+        $("loginPanel").hidden = true;
+        $("application").hidden = false;
+        setTab("products");
+      });
+    });
+
+    $("logoutButton").addEventListener("click", logout);
+
+    $("productsTab").addEventListener("click", () => {
+      clearMessage();
+      setTab("products");
+    });
+
+    $("ordersTab").addEventListener("click", async () => {
+      setTab("orders");
+
+      await withButton($("ordersTab"), async () => {
+        await loadOrders();
+      });
+    });
+
+    $("newProductButton").addEventListener("click", () => {
+      clearMessage();
+      openEditor();
+    });
+
+    $("cancelEditButton").addEventListener("click", () => {
+      editingId = null;
+      $("productEditor").hidden = true;
+    });
+
+    $("refreshProductsButton").addEventListener("click", async () => {
+      await withButton($("refreshProductsButton"), loadProducts);
+    });
+
+    $("productForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      await withButton($("saveProductButton"), async () => {
+        const imageUrl = $("productImage").value.trim();
+
+        if (imageUrl) {
+          let valid = false;
+
+          try {
+            valid = new URL(imageUrl).protocol === "https:";
+          } catch {
+            valid = false;
+          }
+
+          if (!valid) {
+            throw new Error("Ссылка на фото должна начинаться с https://");
+          }
+        }
+
+        const body = {
+          name: $("productName").value.trim(),
+          ca
