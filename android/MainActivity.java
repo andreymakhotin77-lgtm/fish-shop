@@ -143,7 +143,7 @@ public class MainActivity extends Activity {
 
         addressInput = input(
              "Город, улица, дом, квартира",
-        ,
+        
             InputType.TYPE_CLASS_TEXT
         );
 
