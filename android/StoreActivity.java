@@ -466,10 +466,22 @@ public class StoreActivity extends Activity {
         render();
     }
 
-    private void productCard(Product product) {
+        private void productCard(Product product) {
         LinearLayout card = panel();
 
+        ProductArtwork artwork = new ProductArtwork(
+                this,
+                product.name,
+                product.category
+        );
+
+        card.addView(
+                artwork,
+                new LinearLayout.LayoutParams(-1, dp(170))
+        );
+
         card.addView(text(product.category, 13, MUTED));
+
         card.addView(text(product.name, 20, WHITE));
         card.addView(text(
                 product.price + " ₽ / " + product.unit, 21, GOLD
