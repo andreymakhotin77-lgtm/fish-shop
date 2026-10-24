@@ -484,7 +484,7 @@ public class MainActivity extends Activity {
                 if (quantities[i] > 0) {
                     JSONObject item = new JSONObject();
                     item.put("productId", ids[i]);
-                    item.put("quantity", quantities[i])
+                    item.put("quantity", quantities[i]);
                                          items.put(item);
                 }
             }
