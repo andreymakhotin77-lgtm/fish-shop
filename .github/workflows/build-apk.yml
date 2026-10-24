@@ -351,9 +351,16 @@ jobs:
               }
           }
           EOF
+      - name: Connect online application
+        shell: bash
+        run: |
+          cp android/MainActivity.java app/src/main/java/ru/makeevka/fishshop/MainActivity.java
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' app/src/main/AndroidManifest.xml
 
       - name: Build APK
         run: gradle --no-daemon assembleDebug
+
+      
 
       - name: Save APK
         uses: actions/upload-artifact@v4
