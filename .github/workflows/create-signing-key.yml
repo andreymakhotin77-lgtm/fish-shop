@@ -1,0 +1,79 @@
+name: Create signing key
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  create-key:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+
+      - name: Prepare Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Create encrypted signing key
+        shell: bash
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if [ "${#SIGNING_PASSWORD}" -lt 32 ]; then
+            echo "SIGNING_PASSWORD must contain at least 32 characters."
+            exit 1
+          fi
+
+          if [ -e signing/lavka-release.p12.gpg ]; then
+            echo "A signing key already exists. Do not replace it."
+            exit 1
+          fi
+
+          PRIVATE_DIR="$(mktemp -d)"
+          trap 'rm -rf "$PRIVATE_DIR"' EXIT
+
+          mkdir -p signing-backup
+
+          keytool -genkeypair \
+            -alias lavka \
+            -keyalg RSA \
+            -keysize 3072 \
+            -validity 10000 \
+            -storetype PKCS12 \
+            -keystore "$PRIVATE_DIR/lavka-release.p12" \
+            -storepass:env SIGNING_PASSWORD \
+            -keypass:env SIGNING_PASSWORD \
+            -dname "CN=Lavka Vkusa, O=Lavka Vkusa" \
+            -noprompt
+
+          printf '%s' "$SIGNING_PASSWORD" | gpg \
+            --batch \
+            --yes \
+            --pinentry-mode loopback \
+            --passphrase-fd 0 \
+            --symmetric \
+            --cipher-algo AES256 \
+            --output signing-backup/lavka-release.p12.gpg \
+            "$PRIVATE_DIR/lavka-release.p12"
+
+          test -s signing-backup/lavka-release.p12.gpg
+
+          echo "Encrypted signing key created successfully."
+
+      - name: Save encrypted key
+        uses: actions/upload-artifact@v4
+        with:
+          name: lavka-signing-backup
+          path: signing-backup/lavka-release.p12.gpg
+          if-no-files-found: error
+          retention-days: 7
