@@ -938,9 +938,13 @@ public class StoreActivity extends Activity {
                     return;
                 }
 
+                                long orderNumber = data.optLong("orderNumber", 0);
+
                 String receipt =
-                        "Номер: " + id + "\n" +
-                        "Товары: " + data.optLong("totalRub") + " ₽";
+                        (orderNumber > 0
+                                ? "Заказ № " + orderNumber
+                                : "Заказ сохранён. Номер уточняется.") +
+                        "\nТовары: "
 
                 boolean saved = prefs.edit()
                         .remove("pending_order")
