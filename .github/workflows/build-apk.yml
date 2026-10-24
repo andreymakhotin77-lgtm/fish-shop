@@ -1,0 +1,364 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Get repository
+        uses: actions/checkout@v4
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Prepare Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Create demo application
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/ru/makeevka/fishshop
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = 'FishShop'
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'ru.makeevka.fishshop'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'ru.makeevka.fishshop'
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName '0.1-demo'
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="false"
+                  android:label="Рыбный магазин"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/ru/makeevka/fishshop/MainActivity.java <<'EOF'
+          package ru.makeevka.fishshop;
+
+          import android.app.Activity;
+          import android.app.AlertDialog;
+          import android.os.Bundle;
+          import android.graphics.Color;
+          import android.text.InputType;
+          import android.view.View;
+          import android.widget.*;
+
+          public class MainActivity extends Activity {
+              private LinearLayout root;
+              private TextView totalLabel;
+              private EditText nameInput, phoneInput, addressInput;
+              private Switch delivery;
+
+              private final String[] names = {
+                  "Филе лосося", "Скумбрия", "Креветки", "Минтай"
+              };
+              private final String[] packs = {
+                  "500 г", "1 кг", "500 г", "1 кг"
+              };
+              private final int[] prices = {890, 420, 650, 310};
+              private final int[] quantities = new int[4];
+              private final TextView[] counters = new TextView[4];
+
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  ScrollView scroll = new ScrollView(this);
+                  scroll.setFillViewport(true);
+
+                  root = new LinearLayout(this);
+                  root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(dp(18), dp(20), dp(18), dp(28));
+                  root.setBackgroundColor(Color.rgb(244, 248, 250));
+
+                  scroll.addView(root);
+                  setContentView(scroll);
+
+                  text("Рыбный магазин", 28);
+                  text("Макеевка", 18);
+                  text(
+                      "ДЕМОВЕРСИЯ\nЦены примерные. Заказы никуда не отправляются.",
+                      15
+                  );
+
+                  for (int i = 0; i < names.length; i++) {
+                      final int index = i;
+
+                      LinearLayout card = new LinearLayout(this);
+                      card.setOrientation(LinearLayout.VERTICAL);
+                      card.setPadding(dp(14), dp(12), dp(14), dp(12));
+                      card.setBackgroundColor(Color.WHITE);
+
+                      LinearLayout.LayoutParams cp =
+                          new LinearLayout.LayoutParams(-1, -2);
+                      cp.setMargins(0, dp(12), 0, 0);
+                      root.addView(card, cp);
+
+                      TextView name = new TextView(this);
+                      name.setText(names[i]);
+                      name.setTextSize(21);
+                      name.setTextColor(Color.rgb(10, 65, 85));
+                      card.addView(name);
+
+                      TextView price = new TextView(this);
+                      price.setText(packs[i] + " • " + prices[i] + " ₽");
+                      price.setTextSize(17);
+                      card.addView(price);
+
+                      LinearLayout row = new LinearLayout(this);
+                      row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+                      Button minus = new Button(this);
+                      minus.setText("−");
+                      row.addView(minus);
+
+                      TextView count = new TextView(this);
+                      count.setText("0");
+                      count.setTextSize(20);
+                      count.setPadding(dp(18), 0, dp(18), 0);
+                      row.addView(count);
+                      counters[i] = count;
+
+                      Button plus = new Button(this);
+                      plus.setText("+");
+                      row.addView(plus);
+
+                      minus.setOnClickListener(v -> change(index, -1));
+                      plus.setOnClickListener(v -> change(index, 1));
+
+                      card.addView(row);
+                  }
+
+                  totalLabel = text("Товары: 0 ₽", 23);
+                  text("Проверка оформления", 23);
+
+                  nameInput = input(
+                      "Ваше имя",
+                      InputType.TYPE_CLASS_TEXT
+                  );
+                  phoneInput = input(
+                      "Телефон: +7…",
+                      InputType.TYPE_CLASS_PHONE
+                  );
+
+                  delivery = new Switch(this);
+                  delivery.setText("Доставка по Макеевке");
+                  delivery.setChecked(true);
+                  root.addView(delivery);
+
+                  addressInput = input(
+                      "Улица, дом, квартира",
+                      InputType.TYPE_CLASS_TEXT
+                  );
+
+                  delivery.setOnCheckedChangeListener((button, checked) ->
+                      addressInput.setVisibility(
+                          checked ? View.VISIBLE : View.GONE
+                      )
+                  );
+
+                  text(
+                      "Оплата при получении. Условия и стоимость доставки " +
+                      "в рабочей версии будут согласовываться отдельно.",
+                      14
+                  );
+
+                  Button submit = new Button(this);
+                  submit.setText("Проверить заказ — демо");
+                  submit.setOnClickListener(v -> previewOrder());
+                  root.addView(submit);
+
+                  text(
+                      "В этой версии введённые данные не сохраняются " +
+                      "и не передаются в интернет.",
+                      13
+                  );
+              }
+
+              private int dp(int value) {
+                  return Math.round(
+                      value * getResources().getDisplayMetrics().density
+                  );
+              }
+
+              private TextView text(String value, int size) {
+                  TextView view = new TextView(this);
+                  view.setText(value);
+                  view.setTextSize(size);
+                  view.setTextColor(Color.rgb(25, 45, 55));
+                  view.setPadding(0, dp(8), 0, dp(8));
+                  root.addView(view);
+                  return view;
+              }
+
+              private EditText input(String hint, int type) {
+                  EditText view = new EditText(this);
+                  view.setHint(hint);
+                  view.setInputType(type);
+                  root.addView(view);
+                  return view;
+              }
+
+              private void change(int index, int delta) {
+                  quantities[index] = Math.max(
+                      0, Math.min(50, quantities[index] + delta)
+                  );
+                  counters[index].setText(
+                      String.valueOf(quantities[index])
+                  );
+                  totalLabel.setText("Товары: " + total() + " ₽");
+              }
+
+              private int total() {
+                  int result = 0;
+                  for (int i = 0; i < prices.length; i++) {
+                      result += prices[i] * quantities[i];
+                  }
+                  return result;
+              }
+
+              private void previewOrder() {
+                  if (total() == 0) {
+                      message("Добавьте хотя бы один товар.");
+                      return;
+                  }
+
+                  String name = nameInput.getText().toString().trim();
+                  String phone = phoneInput.getText().toString()
+                      .replaceAll("[^0-9]", "");
+                  String address = addressInput.getText().toString().trim();
+
+                  if (name.length() < 2) {
+                      message("Укажите имя.");
+                      return;
+                  }
+
+                  if (!phone.matches("[78][0-9]{10}")) {
+                      message("Укажите телефон: +7 и ещё 10 цифр.");
+                      return;
+                  }
+
+                  if (delivery.isChecked() && address.length() < 5) {
+                      message("Укажите адрес доставки.");
+                      return;
+                  }
+
+                  StringBuilder summary = new StringBuilder();
+
+                  for (int i = 0; i < names.length; i++) {
+                      if (quantities[i] > 0) {
+                          summary.append(names[i])
+                              .append(" (").append(packs[i]).append(")")
+                              .append(" × ").append(quantities[i])
+                              .append("\n");
+                      }
+                  }
+
+                  summary.append("\nТовары: ").append(total()).append(" ₽");
+                  summary.append("\nПолучение: ")
+                      .append(delivery.isChecked() ? "доставка" : "самовывоз");
+                  summary.append(
+                      "\n\nЭто проверка формы. " +
+                      "Заказ НЕ отправлен продавцу."
+                  );
+
+                  new AlertDialog.Builder(this)
+                      .setTitle("Демонстрация заказа")
+                      .setMessage(summary.toString())
+                      .setPositiveButton("Понятно", null)
+                      .show();
+              }
+
+              private void message(String value) {
+                  new AlertDialog.Builder(this)
+                      .setMessage(value)
+                      .setPositiveButton("ОК", null)
+                      .show();
+              }
+          }
+          EOF
+
+      - name: Build APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Save APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fish-shop-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
