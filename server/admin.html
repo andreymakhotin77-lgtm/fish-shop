@@ -1047,6 +1047,80 @@
           }
         }
 
-        const body = {
+               const body = {
           name: $("productName").value.trim(),
-          ca
+          category: $("productCategory").value.trim(),
+          priceRub: Number($("productPrice").value),
+          unit: $("productUnit").value,
+          description: $("productDescription").value.trim(),
+          imageUrl,
+          available: $("productAvailable").checked,
+          sortOrder: Number($("productSort").value)
+        };
+
+        const route = editingId
+          ? "/api/admin/products/" + encodeURIComponent(editingId)
+          : "/api/admin/products";
+
+        await api(route, {
+          method: editingId ? "PUT" : "POST",
+          body
+        });
+
+        editingId = null;
+        $("productEditor").hidden = true;
+
+        showMessage("Товар сохранён в базе магазина.");
+
+        try {
+          await loadProducts();
+        } catch (error) {
+          showMessage(
+            "Товар сохранён, но список не обновился. " +
+            "Нажмите «Обновить». " + error.message,
+            true
+          );
+        }
+      });
+    });
+
+    $("refreshOrdersButton").addEventListener("click", async () => {
+      await withButton($("refreshOrdersButton"), loadOrders);
+    });
+
+    let pagingBusy = false;
+
+    async function changePage(delta) {
+      if (pagingBusy) return;
+
+      pagingBusy = true;
+      const previous = orderPage;
+      orderPage = Math.max(1, orderPage + delta);
+
+      $("previousPageButton").disabled = true;
+      $("nextPageButton").disabled = true;
+
+      try {
+        clearMessage();
+        await loadOrders();
+      } catch (error) {
+        orderPage = previous;
+        $("previousPageButton").disabled = orderPage <= 1;
+        $("nextPageButton").disabled = false;
+        reportError(error);
+      } finally {
+        pagingBusy = false;
+      }
+    }
+
+    $("previousPageButton").addEventListener("click", () => {
+      changePage(-1);
+    });
+
+    $("nextPageButton").addEventListener("click", () => {
+      changePage(1);
+    });
+  </script>
+</body>
+</html>
+ 
