@@ -87,7 +87,7 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application
                   android:allowBackup="false"
-                  android:label="Рыбный магазин"
+                  android:label="Лавка Вкуса"
                   android:supportsRtl="true"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar">
                   <activity
@@ -120,15 +120,18 @@ jobs:
               private EditText nameInput, phoneInput, addressInput;
               private Switch delivery;
 
-              private final String[] names = {
-                  "Филе лосося", "Скумбрия", "Креветки", "Минтай"
+                           private final String[] names = {
+                  "Раки живые",
+                  "Скумбрия без головы",
+                  "Тушка леща с икрой"
               };
               private final String[] packs = {
-                  "500 г", "1 кг", "500 г", "1 кг"
+                  "1 кг", "1 кг", "1 кг"
               };
-              private final int[] prices = {890, 420, 650, 310};
-              private final int[] quantities = new int[4];
-              private final TextView[] counters = new TextView[4];
+              private final int[] prices = {4500, 1400, 1700};
+              private final int[] quantities = new int[3];
+              private final TextView[] counters = new TextView[3];
+ 
 
               @Override
               public void onCreate(Bundle savedInstanceState) {
@@ -145,7 +148,7 @@ jobs:
                   scroll.addView(root);
                   setContentView(scroll);
 
-                  text("Рыбный магазин", 28);
+                  text("Лавка Вкуса", 28);
                   text("Макеевка", 18);
                   text(
                       "ДЕМОВЕРСИЯ\nЦены примерные. Заказы никуда не отправляются.",
