@@ -36,6 +36,7 @@ function json(res, status, data) {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff"
   });
+
   res.end(JSON.stringify(data));
 }
 
@@ -47,6 +48,7 @@ function fail(status, message) {
 
 async function readJson(req) {
   const type = String(req.headers["content-type"] || "");
+
   if (!type.toLowerCase().startsWith("application/json")) {
     throw fail(415, "Ожидается JSON.");
   }
@@ -56,16 +58,24 @@ async function readJson(req) {
 
   for await (const chunk of req) {
     size += chunk.length;
+
     if (size > 32768) {
       throw fail(413, "Слишком большой запрос.");
     }
+
     chunks.push(chunk);
   }
 
   try {
-    const data = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const data = JSON.parse(
+      Buffer.concat(chunks).toString("utf8")
+    );
 
-    if (!data || typeof data !== "object" || Array.isArray(data)) {
+    if (
+      !data ||
+      typeof data !== "object" ||
+      Array.isArray(data)
+    ) {
       throw new Error();
     }
 
@@ -88,8 +98,15 @@ function checkAdmin(req) {
   const supplied = String(req.headers.authorization || "");
   const expected = `Bearer ${ADMIN_TOKEN}`;
 
-  const a = crypto.createHash("sha256").update(supplied).digest();
-  const b = crypto.createHash("sha256").update(expected).digest();
+  const a = crypto
+    .createHash("sha256")
+    .update(supplied)
+    .digest();
+
+  const b = crypto
+    .createHash("sha256")
+    .update(expected)
+    .digest();
 
   if (!crypto.timingSafeEqual(a, b)) {
     throw fail(401, "Неверный ключ доступа продавца.");
@@ -115,6 +132,7 @@ function productView(row) {
 function orderView(row) {
   return {
     id: row.id,
+    orderNumber: Number(row.order_number),
     requestId: row.request_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -171,6 +189,19 @@ async function initializeDatabase() {
       )
     `);
 
+    // Постоянные короткие номера заказов.
+    // При повторных запусках нумерация не сбрасывается.
+    await client.query(`
+      ALTER TABLE lv_orders
+      ADD COLUMN IF NOT EXISTS order_number BIGINT
+      GENERATED ALWAYS AS IDENTITY (START WITH 1001)
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS lv_orders_number_idx
+      ON lv_orders (order_number)
+    `);
+
     await client.query(`
       CREATE INDEX IF NOT EXISTS lv_orders_created_idx
       ON lv_orders (created_at DESC)
@@ -204,15 +235,22 @@ async function initializeDatabase() {
 function normalizeOrder(data) {
   const requestId = text(data.requestId, 80).toLowerCase();
 
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestId)) {
+  const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+  if (!uuidPattern.test(requestId)) {
     throw fail(400, "Некорректный идентификатор заказа.");
   }
 
   const name = text(data.name, 80);
   const phone = text(data.phone, 32).replace(/\D/g, "");
   const fulfillment = data.fulfillment;
+
   const address =
-    fulfillment === "delivery" ? text(data.address, 250) : "";
+    fulfillment === "delivery"
+      ? text(data.address, 250)
+      : "";
+
   const comment = text(data.comment, 300);
 
   if (name.length < 2) {
@@ -260,10 +298,16 @@ function normalizeOrder(data) {
     }
 
     seen.add(productId);
-    return { productId, quantity };
+
+    return {
+      productId,
+      quantity
+    };
   });
 
-  items.sort((a, b) => a.productId.localeCompare(b.productId));
+  items.sort((a, b) =>
+    a.productId.localeCompare(b.productId)
+  );
 
   return {
     requestId,
@@ -287,7 +331,8 @@ async function saveOrder(order) {
   try {
     await client.query("BEGIN");
 
-    // Одновременные повторы одного заказа обрабатываются по очереди.
+    // Одновременные повторы одного заказа
+    // обрабатываются по очереди.
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtext($1))",
       [order.requestId]
@@ -309,7 +354,11 @@ async function saveOrder(order) {
       }
 
       await client.query("COMMIT");
-      return { row: previous, created: false };
+
+      return {
+        row: previous,
+        created: false
+      };
     }
 
     const found = await client.query(
@@ -349,16 +398,29 @@ async function saveOrder(order) {
       };
     });
 
-    if (!Number.isSafeInteger(totalRub) || totalRub > 10000000) {
+    if (
+      !Number.isSafeInteger(totalRub) ||
+      totalRub > 10000000
+    ) {
       throw fail(400, "Слишком большая сумма заказа.");
     }
 
+    // Технический идентификатор остаётся внутри системы.
+    // Короткий order_number назначает PostgreSQL.
     const id = `LV-${crypto.randomUUID()}`;
 
     const result = await client.query(
       `INSERT INTO lv_orders (
-        id, request_id, fingerprint, customer_name,
-        phone, fulfillment, address, comment, items, total_rub
+        id,
+        request_id,
+        fingerprint,
+        customer_name,
+        phone,
+        fulfillment,
+        address,
+        comment,
+        items,
+        total_rub
       )
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
       RETURNING *`,
@@ -378,7 +440,10 @@ async function saveOrder(order) {
 
     await client.query("COMMIT");
 
-    return { row: result.rows[0], created: true };
+    return {
+      row: result.rows[0],
+      created: true
+    };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;
@@ -407,7 +472,7 @@ async function notifyTelegram(row) {
 
     const message = [
       "НОВЫЙ ЗАКАЗ — ЛАВКА ВКУСА",
-      `Номер: ${row.id}`,
+      `Заказ № ${row.order_number}`,
       "",
       `Покупатель: ${row.customer_name}`,
       `Телефон: ${row.phone}`,
@@ -423,8 +488,8 @@ async function notifyTelegram(row) {
       row.comment ? `Комментарий: ${row.comment}` : ""
     ].filter(Boolean).join("\n");
 
-    // Несколько сообщений нужны только для очень больших корзин.
     const parts = [];
+
     for (let i = 0; i < message.length; i += 3500) {
       parts.push(message.slice(i, i + 3500));
     }
@@ -435,7 +500,9 @@ async function notifyTelegram(row) {
           `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json"
+            },
             body: JSON.stringify({
               chat_id: CHAT_ID,
               text: part
@@ -447,27 +514,36 @@ async function notifyTelegram(row) {
         const body = await response.json();
 
         if (!response.ok || !body.ok) {
-          throw new Error("Telegram did not confirm delivery");
+          throw new Error(
+            "Telegram did not confirm delivery"
+          );
         }
       }
 
       notificationStatus = "sent";
     } catch {
-      // Заказ уже сохранён. Не создаём его повторно из-за Telegram.
+      // Заказ уже сохранён в базе.
+      // Сбой Telegram не создаёт второй заказ.
       notificationStatus = "unconfirmed";
-      console.error(`Нет подтверждения Telegram для заказа ${row.id}`);
+
+      console.error(
+        `Нет подтверждения Telegram для заказа № ${row.order_number}`
+      );
     }
   }
 
   try {
     await pool.query(
       `UPDATE lv_orders
-       SET telegram_status = $2, updated_at = NOW()
+       SET telegram_status = $2,
+           updated_at = NOW()
        WHERE id = $1`,
       [row.id, notificationStatus]
     );
   } catch {
-    console.error(`Не обновлён статус уведомления заказа ${row.id}`);
+    console.error(
+      `Не обновлён статус уведомления заказа № ${row.order_number}`
+    );
   }
 
   return notificationStatus;
@@ -475,13 +551,24 @@ async function notifyTelegram(row) {
 
 function normalizeProduct(data, id) {
   const name = text(data.name, 120);
-  const category = text(data.category, 80) || "Рыба и морепродукты";
+
+  const category =
+    text(data.category, 80) || "Рыба и морепродукты";
+
   const description = text(data.description, 2000);
   const unit = text(data.unit, 20) || "кг";
   const imageUrl = text(data.imageUrl, 1500);
   const priceRub = data.priceRub;
-  const available = data.available === undefined ? true : data.available;
-  const sortOrder = data.sortOrder === undefined ? 0 : data.sortOrder;
+
+  const available =
+    data.available === undefined
+      ? true
+      : data.available;
+
+  const sortOrder =
+    data.sortOrder === undefined
+      ? 0
+      : data.sortOrder;
 
   if (!/^[a-z0-9_-]{1,80}$/.test(id)) {
     throw fail(400, "Некорректный код товара.");
@@ -496,11 +583,17 @@ function normalizeProduct(data, id) {
     priceRub < 1 ||
     priceRub > 1000000
   ) {
-    throw fail(400, "Цена должна быть целым числом от 1 до 1000000.");
+    throw fail(
+      400,
+      "Цена должна быть целым числом от 1 до 1000000."
+    );
   }
 
   if (typeof available !== "boolean") {
-    throw fail(400, "Некорректное значение наличия товара.");
+    throw fail(
+      400,
+      "Некорректное значение наличия товара."
+    );
   }
 
   if (
@@ -508,31 +601,49 @@ function normalizeProduct(data, id) {
     sortOrder < -100000 ||
     sortOrder > 100000
   ) {
-    throw fail(400, "Некорректный порядок сортировки.");
+    throw fail(
+      400,
+      "Некорректный порядок сортировки."
+    );
   }
 
   if (imageUrl) {
     try {
       const url = new URL(imageUrl);
-      if (url.protocol !== "https:") throw new Error();
+
+      if (url.protocol !== "https:") {
+        throw new Error();
+      }
     } catch {
-      throw fail(400, "Ссылка на фото должна начинаться с https://");
+      throw fail(
+        400,
+        "Ссылка на фото должна начинаться с https://"
+      );
     }
   }
 
   return {
-    id, name, category, description,
-    priceRub, unit, imageUrl, available, sortOrder
+    id,
+    name,
+    category,
+    description,
+    priceRub,
+    unit,
+    imageUrl,
+    available,
+    sortOrder
   };
 }
 
-// Общий ограничитель нагрузки для небольшой тестовой версии.
+// Общий ограничитель нагрузки тестовой версии.
 // Перед публичной рекламой нужен также лимит на уровне прокси.
 let limitStarted = Date.now();
 let writeRequests = 0;
 
 function limitWrites(req) {
-  if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return;
+  const methods = ["POST", "PUT", "PATCH", "DELETE"];
+
+  if (!methods.includes(req.method)) return;
 
   if (Date.now() - limitStarted > 60000) {
     limitStarted = Date.now();
@@ -542,7 +653,10 @@ function limitWrites(req) {
   writeRequests += 1;
 
   if (writeRequests > 120) {
-    throw fail(429, "Слишком много запросов. Попробуйте через минуту.");
+    throw fail(
+      429,
+      "Слишком много запросов. Попробуйте через минуту."
+    );
   }
 }
 
@@ -563,11 +677,15 @@ async function handle(req, res) {
       store: "Лавка Вкуса",
       databaseConnected: true,
       telegramConfigured: Boolean(BOT_TOKEN && CHAT_ID),
-      adminConfigured: ADMIN_TOKEN.length >= 32
+      adminConfigured: ADMIN_TOKEN.length >= 32,
+      orderNumbersEnabled: true
     });
   }
 
-  if (req.method === "GET" && pathname === "/api/products") {
+  if (
+    req.method === "GET" &&
+    pathname === "/api/products"
+  ) {
     const result = await pool.query(
       `SELECT * FROM lv_products
        WHERE available = TRUE
@@ -579,9 +697,13 @@ async function handle(req, res) {
     });
   }
 
-  if (req.method === "GET" && pathname === "/api/categories") {
+  if (
+    req.method === "GET" &&
+    pathname === "/api/categories"
+  ) {
     const result = await pool.query(
-      `SELECT DISTINCT category FROM lv_products
+      `SELECT DISTINCT category
+       FROM lv_products
        WHERE available = TRUE
        ORDER BY category`
     );
@@ -591,7 +713,10 @@ async function handle(req, res) {
     });
   }
 
-  if (req.method === "POST" && pathname === "/api/orders") {
+  if (
+    req.method === "POST" &&
+    pathname === "/api/orders"
+  ) {
     const input = normalizeOrder(await readJson(req));
     const saved = await saveOrder(input);
 
@@ -604,6 +729,7 @@ async function handle(req, res) {
     return json(res, saved.created ? 201 : 200, {
       ok: true,
       id: saved.row.id,
+      orderNumber: Number(saved.row.order_number),
       totalRub: saved.row.total_rub,
       status: saved.row.status,
       telegramStatus,
@@ -611,8 +737,6 @@ async function handle(req, res) {
     });
   }
 
-  // Страницу панели добавим отдельным файлом следующим шагом.
-  // Сама страница не содержит данных и секретов.
   if (
     req.method === "GET" &&
     (pathname === "/admin" || pathname === "/admin/")
@@ -642,9 +766,13 @@ async function handle(req, res) {
   if (pathname.startsWith("/api/admin/")) {
     checkAdmin(req);
 
-    if (req.method === "GET" && pathname === "/api/admin/products") {
+    if (
+      req.method === "GET" &&
+      pathname === "/api/admin/products"
+    ) {
       const result = await pool.query(
-        "SELECT * FROM lv_products ORDER BY sort_order, name"
+        `SELECT * FROM lv_products
+         ORDER BY sort_order, name`
       );
 
       return json(res, 200, {
@@ -652,25 +780,44 @@ async function handle(req, res) {
       });
     }
 
-    if (req.method === "POST" && pathname === "/api/admin/products") {
+    if (
+      req.method === "POST" &&
+      pathname === "/api/admin/products"
+    ) {
       const data = await readJson(req);
-      const id = data.id === undefined
-        ? `product-${crypto.randomUUID()}`
-        : text(data.id, 80);
+
+      const id =
+        data.id === undefined
+          ? `product-${crypto.randomUUID()}`
+          : text(data.id, 80);
 
       const p = normalizeProduct(data, id);
 
       try {
         const result = await pool.query(
           `INSERT INTO lv_products (
-            id, name, category, description, price_rub,
-            unit, image_url, available, sort_order
+            id,
+            name,
+            category,
+            description,
+            price_rub,
+            unit,
+            image_url,
+            available,
+            sort_order
           )
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
           RETURNING *`,
           [
-            p.id, p.name, p.category, p.description,
-            p.priceRub, p.unit, p.imageUrl, p.available, p.sortOrder
+            p.id,
+            p.name,
+            p.category,
+            p.description,
+            p.priceRub,
+            p.unit,
+            p.imageUrl,
+            p.available,
+            p.sortOrder
           ]
         );
 
@@ -679,8 +826,12 @@ async function handle(req, res) {
         });
       } catch (error) {
         if (error.code === "23505") {
-          throw fail(409, "Товар с таким кодом уже существует.");
+          throw fail(
+            409,
+            "Товар с таким кодом уже существует."
+          );
         }
+
         throw error;
       }
     }
@@ -697,14 +848,27 @@ async function handle(req, res) {
 
       const result = await pool.query(
         `UPDATE lv_products SET
-          name=$2, category=$3, description=$4, price_rub=$5,
-          unit=$6, image_url=$7, available=$8,
-          sort_order=$9, updated_at=NOW()
-         WHERE id=$1
+          name = $2,
+          category = $3,
+          description = $4,
+          price_rub = $5,
+          unit = $6,
+          image_url = $7,
+          available = $8,
+          sort_order = $9,
+          updated_at = NOW()
+         WHERE id = $1
          RETURNING *`,
         [
-          p.id, p.name, p.category, p.description,
-          p.priceRub, p.unit, p.imageUrl, p.available, p.sortOrder
+          p.id,
+          p.name,
+          p.category,
+          p.description,
+          p.priceRub,
+          p.unit,
+          p.imageUrl,
+          p.available,
+          p.sortOrder
         ]
       );
 
@@ -717,10 +881,19 @@ async function handle(req, res) {
       });
     }
 
-    if (req.method === "GET" && pathname === "/api/admin/orders") {
+    if (
+      req.method === "GET" &&
+      pathname === "/api/admin/orders"
+    ) {
       const page = Math.max(
         1,
-        Math.min(100000, Number.parseInt(url.searchParams.get("page"), 10) || 1)
+        Math.min(
+          100000,
+          Number.parseInt(
+            url.searchParams.get("page"),
+            10
+          ) || 1
+        )
       );
 
       const result = await pool.query(
@@ -755,13 +928,17 @@ async function handle(req, res) {
       ];
 
       if (!allowed.includes(data.status)) {
-        throw fail(400, "Некорректный статус заказа.");
+        throw fail(
+          400,
+          "Некорректный статус заказа."
+        );
       }
 
       const result = await pool.query(
         `UPDATE lv_orders
-         SET status=$2, updated_at=NOW()
-         WHERE id=$1
+         SET status = $2,
+             updated_at = NOW()
+         WHERE id = $1
          RETURNING *`,
         [statusMatch[1], data.status]
       );
@@ -776,7 +953,9 @@ async function handle(req, res) {
     }
   }
 
-  return json(res, 404, { error: "Страница не найдена." });
+  return json(res, 404, {
+    error: "Страница не найдена."
+  });
 }
 
 const server = http.createServer((req, res) => {
@@ -788,13 +967,17 @@ const server = http.createServer((req, res) => {
       : 500;
 
     if (status >= 500) {
-      console.error("Ошибка обработки запроса:", error.code || "internal");
+      console.error(
+        "Ошибка обработки запроса:",
+        error.code || "internal"
+      );
     }
 
     json(res, status, {
-      error: status === 500
-        ? "Ошибка сервера. Повторите запрос позже."
-        : error.message
+      error:
+        status === 500
+          ? "Ошибка сервера. Повторите запрос позже."
+          : error.message
     });
   });
 });
@@ -807,7 +990,8 @@ initializeDatabase()
   .then(() => {
     server.listen(PORT, "0.0.0.0", () => {
       console.log("Сервер Лавки Вкуса запущен.");
-      console.log("База данных подключена, таблицы подготовлены.");
+      console.log("База данных подключена.");
+      console.log("Короткие номера заказов включены.");
     });
   })
   .catch((error) => {
@@ -815,6 +999,7 @@ initializeDatabase()
       "Не удалось подготовить базу данных:",
       error.code || "connection_error"
     );
+
     process.exit(1);
   });
 
@@ -825,3 +1010,5 @@ process.on("SIGTERM", () => {
 
   setTimeout(() => process.exit(1), 10000).unref();
 });
+
+// КОНЕЦ ФАЙЛА
