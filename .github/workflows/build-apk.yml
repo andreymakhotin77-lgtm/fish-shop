@@ -357,8 +357,54 @@ jobs:
           cp android/MainActivity.java app/src/main/java/ru/makeevka/fishshop/MainActivity.java
           sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' app/src/main/AndroidManifest.xml
 
+           - name: Create black and gold icon
+        shell: bash
+        run: |
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
+
+          cat > app/src/main/res/drawable/ic_lavka_background.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android"
+              android:shape="rectangle">
+              <solid android:color="#121212" />
+          </shape>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_lavka_foreground.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+
+              <path
+                  android:fillColor="#D4AF37"
+                  android:pathData="M25,72 L35,36 L49,36 L49,72 L42,72 L42,43 L40,43 L32,72 Z" />
+
+              <path
+                  android:fillColor="#D4AF37"
+                  android:fillType="evenOdd"
+                  android:pathData="M56,36 L68,36 C77,36 82,40 82,46 C82,50 80,53 77,54 C81,55 84,58 84,63 C84,69 79,72 69,72 L56,72 Z M63,42 L63,51 L68,51 C73,51 75,49 75,46.5 C75,43.5 73,42 68,42 Z M63,57 L63,66 L69,66 C74,66 77,65 77,61.5 C77,58.5 74,57 69,57 Z" />
+
+          </vector>
+          EOF
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_lavka_background" />
+              <foreground android:drawable="@drawable/ic_lavka_foreground" />
+          </adaptive-icon>
+          EOF
+
+          sed -i '/<application/a\        android:icon="@mipmap/ic_launcher"' app/src/main/AndroidManifest.xml
+          sed -i '/<application/a\        android:roundIcon="@mipmap/ic_launcher"' app/src/main/AndroidManifest.xml
+
       - name: Build APK
         run: gradle --no-daemon assembleDebug
+ 
 
       
 
