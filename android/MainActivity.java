@@ -485,3 +485,233 @@ public class MainActivity extends Activity {
                     JSONObject item = new JSONObject();
                     item.put("productId", ids[i]);
                     item.put("quantity", quantities[i])
+                                         items.put(item);
+                }
+            }
+
+            JSONObject order = new JSONObject();
+            order.put("requestId", UUID.randomUUID().toString());
+            order.put("name", name);
+            order.put("phone", phone);
+            order.put(
+                "fulfillment",
+                delivery.isChecked() ? "delivery" : "pickup"
+            );
+            order.put(
+                "address",
+                delivery.isChecked() ? address : ""
+            );
+            order.put("comment", "");
+            order.put("items", items);
+
+            String payload = order.toString();
+
+            boolean saved = getPreferences(MODE_PRIVATE)
+                .edit()
+                .putString("pending_order", payload)
+                .commit();
+
+            if (!saved) {
+                message("Не удалось сохранить запрос на телефоне.");
+                return;
+            }
+
+            pendingOrder = payload;
+            sendOrder(payload);
+
+        } catch (Exception error) {
+            message("Не удалось подготовить заказ.");
+        }
+    }
+
+    private static class ApiException extends Exception {
+        final boolean clearPending;
+
+        ApiException(String message, boolean clearPending) {
+            super(message);
+            this.clearPending = clearPending;
+        }
+    }
+
+    private void sendOrder(String payload) {
+        setSending(true);
+
+        Toast.makeText(
+            this,
+            "После простоя сервера отправка может занять около минуты.",
+            Toast.LENGTH_LONG
+        ).show();
+
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+
+            try {
+                connection = (HttpURLConnection)
+                    new URL(API + "/api/orders").openConnection();
+
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(20000);
+                connection.setReadTimeout(120000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty(
+                    "Content-Type",
+                    "application/json; charset=utf-8"
+                );
+
+                byte[] bytes =
+                    payload.getBytes(StandardCharsets.UTF_8);
+
+                try (OutputStream output =
+                         connection.getOutputStream()) {
+                    output.write(bytes);
+                }
+
+                int status = connection.getResponseCode();
+
+                InputStream stream =
+                    status >= 200 && status < 300
+                        ? connection.getInputStream()
+                        : connection.getErrorStream();
+
+                String responseText = "";
+
+                if (stream != null) {
+                    try (
+                        InputStream input = stream;
+                        ByteArrayOutputStream output =
+                            new ByteArrayOutputStream()
+                    ) {
+                        byte[] buffer = new byte[4096];
+                        int count;
+
+                        while ((count = input.read(buffer)) != -1) {
+                            output.write(buffer, 0, count);
+                        }
+
+                        responseText = output.toString("UTF-8");
+                    }
+                }
+
+                JSONObject response = new JSONObject(responseText);
+
+                if (status < 200 || status >= 300) {
+                    boolean clear =
+                        status == 400 ||
+                        status == 409 ||
+                        status == 413 ||
+                        status == 415;
+
+                    throw new ApiException(
+                        response.optString(
+                            "error",
+                            "Ошибка сервера: " + status
+                        ),
+                        clear
+                    );
+                }
+
+                String id = response.getString("id");
+                int amount = response.getInt("totalRub");
+
+                getPreferences(MODE_PRIVATE)
+                    .edit()
+                    .remove("pending_order")
+                    .commit();
+
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+
+                    pendingOrder = null;
+                    pendingLabel.setVisibility(View.GONE);
+
+                    for (int i = 0; i < quantities.length; i++) {
+                        quantities[i] = 0;
+                        counters[i].setText("0 кг");
+                    }
+
+                    totalLabel.setText("Товары: 0 ₽");
+                    setSending(false);
+
+                    message(
+                        "Заказ передан продавцу!\n\n" +
+                        "Номер: " + id + "\n\n" +
+                        "Товары: " + money(amount) + " ₽\n\n" +
+                        "Ожидайте подтверждения наличия, " +
+                        "итоговой суммы и получения по телефону."
+                    );
+                });
+
+            } catch (Exception error) {
+                boolean clear =
+                    error instanceof ApiException &&
+                    ((ApiException) error).clearPending;
+
+                if (clear) {
+                    getPreferences(MODE_PRIVATE)
+                        .edit()
+                        .remove("pending_order")
+                        .commit();
+                }
+
+                String details = error.getMessage();
+
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+
+                    if (clear) {
+                        pendingOrder = null;
+                    }
+
+                    pendingLabel.setVisibility(
+                        pendingOrder == null
+                            ? View.GONE
+                            : View.VISIBLE
+                    );
+
+                    setSending(false);
+
+                    message(
+                        "Нет подтверждения отправки.\n\n" +
+                        (details == null
+                            ? "Ошибка соединения."
+                            : details) +
+                        "\n\nЕсли заказ уже появился у продавца, " +
+                        "не отправляйте его повторно."
+                    );
+                });
+
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        }).start();
+    }
+
+    private void message(String value) {
+        if (isFinishing() || isDestroyed()) return;
+
+        AlertDialog dialog = new AlertDialog.Builder(
+            this,
+            android.R.style.Theme_Material_Dialog_Alert
+        )
+            .setTitle("Лавка Вкуса")
+            .setMessage(value)
+            .setPositiveButton("Понятно", null)
+            .create();
+
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setTextColor(GOLD);
+
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().setBackgroundDrawable(
+                    new android.graphics.drawable.ColorDrawable(CARD)
+                );
+            }
+        });
+
+        dialog.show();
+    }
+}
+
