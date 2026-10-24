@@ -138,8 +138,9 @@ jobs:
           cp android/StoreActivity.java \
             app/src/main/java/ru/makeevka/fishshop/StoreActivity.java
 
-          cp android/ShopApi.java \
-            app/src/main/java/ru/makeevka/fishshop/ShopApi.java
+                    cp android/*.java \
+            app/src/main/java/ru/makeevka/fishshop/
+
 
       - name: Create black and gold icon
         shell: bash
