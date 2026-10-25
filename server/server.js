@@ -9,7 +9,6 @@ const { Pool } = require("pg");
 // -------------------- НАСТРОЙКИ --------------------
 
 const PORT = Number(process.env.PORT || 3000);
-
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
@@ -25,6 +24,15 @@ const CLOUD_API_SECRET =
 
 const PICKUP =
   "г. Макеевка, ул. Плеханова, 1в, магазин «Лавка Вкуса»";
+
+const FREE_DELIVERY_THRESHOLD_KOPECKS = 200000;
+const DELIVERY_POLICY_VERSION = 1;
+
+const FREE_DELIVERY_CITIES = [
+  "Макеевка",
+  "Донецк",
+  "Харцызск"
+];
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_UPLOAD_BODY_BYTES = 7 * 1024 * 1024 + 16384;
@@ -233,9 +241,215 @@ async function readJson(req, maxBytes = 32768) {
   }
 }
 
+// -------------------- ДОСТАВКА И ГОРОДА --------------------
+
+function cityKey(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase()
+    .replace(/ё/g, "е");
+}
+
+function deliveryOptions() {
+  return {
+    policyVersion: DELIVERY_POLICY_VERSION,
+    cities: [...FREE_DELIVERY_CITIES],
+    otherCityAllowed: true,
+    cityField: "deliveryCity",
+    freeDeliveryThresholdRub:
+      FREE_DELIVERY_THRESHOLD_KOPECKS / 100,
+    pickupAddress: PICKUP,
+    otherCityMessage:
+      "Возможность и стоимость доставки согласует магазин.",
+    belowThresholdMessage:
+      "Стоимость доставки согласуется с покупателем.",
+    deliveryFeeCalculatedAutomatically: false
+  };
+}
+
+function normalizeDeliveryCity(data, fulfillment) {
+  if (fulfillment !== "delivery") return "";
+
+  // Старые версии приложения не передают это поле.
+  // Не определяем город автоматически по строке адреса.
+  if (
+    !Object.prototype.hasOwnProperty.call(
+      data,
+      "deliveryCity"
+    )
+  ) {
+    return "";
+  }
+
+  if (typeof data.deliveryCity !== "string") {
+    throw fail(400, "Выберите город доставки.");
+  }
+
+  const raw = data.deliveryCity.trim();
+
+  if (
+    raw.length < 2 ||
+    raw.length > 80 ||
+    /[\u0000-\u001f\u007f]/.test(raw)
+  ) {
+    throw fail(
+      400,
+      "Укажите город доставки от 2 до 80 символов."
+    );
+  }
+
+  const normalized = raw.replace(/\s+/g, " ");
+
+  if (
+    ["другой город", "другой", "other"]
+      .includes(cityKey(normalized))
+  ) {
+    throw fail(
+      400,
+      "Введите название другого города."
+    );
+  }
+
+  const knownCity = FREE_DELIVERY_CITIES.find(
+    (city) => cityKey(city) === cityKey(normalized)
+  );
+
+  return knownCity || normalized;
+}
+
+function calculateDeliveryInfo(
+  fulfillment,
+  deliveryCity,
+  totalKopecks
+) {
+  const common = {
+    policyVersion: DELIVERY_POLICY_VERSION,
+    city: deliveryCity || "",
+    freeDeliveryThresholdRub:
+      FREE_DELIVERY_THRESHOLD_KOPECKS / 100
+  };
+
+  if (fulfillment === "pickup") {
+    return {
+      ...common,
+      city: "",
+      zoneEligible: false,
+      freeDelivery: false,
+      remainingRub: null,
+      deliveryFeeRub: 0,
+      deliveryFeeStatus: "not_applicable",
+      message: `Самовывоз: ${PICKUP}`
+    };
+  }
+
+  const zoneEligible = FREE_DELIVERY_CITIES.some(
+    (city) => cityKey(city) === cityKey(deliveryCity)
+  );
+
+  if (!deliveryCity) {
+    return {
+      ...common,
+      zoneEligible: false,
+      freeDelivery: false,
+      remainingRub: null,
+      deliveryFeeRub: null,
+      deliveryFeeStatus: "by_agreement",
+      message:
+        "Город не выбран в приложении. " +
+        "Условия и стоимость доставки уточнит магазин. " +
+        "По Макеевке, Донецку и Харцызску " +
+        "доставка бесплатна от 2 000 ₽."
+    };
+  }
+
+  if (!zoneEligible) {
+    return {
+      ...common,
+      zoneEligible: false,
+      freeDelivery: false,
+      remainingRub: null,
+      deliveryFeeRub: null,
+      deliveryFeeStatus: "by_agreement",
+      message:
+        "Возможность и стоимость доставки " +
+        "в этот город согласует магазин."
+    };
+  }
+
+  if (totalKopecks >= FREE_DELIVERY_THRESHOLD_KOPECKS) {
+    return {
+      ...common,
+      zoneEligible: true,
+      freeDelivery: true,
+      remainingRub: 0,
+      deliveryFeeRub: 0,
+      deliveryFeeStatus: "free",
+      message: `Доставка по городу ${deliveryCity} — бесплатно.`
+    };
+  }
+
+  const remainingKopecks =
+    FREE_DELIVERY_THRESHOLD_KOPECKS - totalKopecks;
+
+  return {
+    ...common,
+    zoneEligible: true,
+    freeDelivery: false,
+    remainingRub: remainingKopecks / 100,
+    deliveryFeeRub: null,
+    deliveryFeeStatus: "by_agreement",
+    message:
+      "Стоимость доставки согласуется с покупателем. " +
+      "До бесплатной доставки осталось " +
+      rub(remainingKopecks / 100) + "."
+  };
+}
+
+function storedDeliveryInfo(row) {
+  // Возвращаем условия, сохранённые при оформлении,
+  // а не пересчитываем историю по новым правилам.
+  const saved = row.delivery_terms;
+
+  if (
+    saved &&
+    typeof saved === "object" &&
+    !Array.isArray(saved) &&
+    typeof saved.message === "string"
+  ) {
+    return saved;
+  }
+
+  if (row.fulfillment === "pickup") {
+    return {
+      policyVersion: null,
+      city: "",
+      zoneEligible: null,
+      freeDelivery: false,
+      remainingRub: null,
+      deliveryFeeRub: 0,
+      deliveryFeeStatus: "not_applicable",
+      message: `Самовывоз: ${PICKUP}`
+    };
+  }
+
+  // Не меняем условия старого заказа задним числом.
+  return {
+    policyVersion: null,
+    city: row.delivery_city || "",
+    zoneEligible: null,
+    freeDelivery: null,
+    remainingRub: null,
+    deliveryFeeRub: null,
+    deliveryFeeStatus: "legacy",
+    message:
+      "Условия доставки этого старого заказа " +
+      "уточняйте по ранее достигнутой договорённости с магазином."
+  };
+}
+
 // -------------------- ОГРАНИЧЕНИЯ ЗАПРОСОВ --------------------
 
-// Лимиты действуют в пределах одного запущенного сервера.
 let writesStarted = Date.now();
 let writeCount = 0;
 
@@ -341,6 +555,8 @@ function orderView(row) {
     name: row.customer_name,
     phone: row.phone,
     fulfillment: row.fulfillment,
+    deliveryCity: row.delivery_city || "",
+    deliveryInfo: storedDeliveryInfo(row),
     address: row.address,
     comment: row.comment,
     items: row.items,
@@ -357,6 +573,8 @@ function customerOrderView(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     fulfillment: row.fulfillment,
+    deliveryCity: row.delivery_city || "",
+    deliveryInfo: storedDeliveryInfo(row),
     pickupAddress:
       row.fulfillment === "pickup" ? PICKUP : "",
     items: row.items,
@@ -376,7 +594,6 @@ async function initializeDatabase() {
   try {
     await client.query("BEGIN");
 
-    // Не допускаем одновременного выполнения миграций.
     await client.query(
       "SELECT pg_advisory_xact_lock(781240193)"
     );
@@ -473,6 +690,17 @@ async function initializeDatabase() {
     await client.query(`
       ALTER TABLE lv_orders
       ADD COLUMN IF NOT EXISTS tracking_token_hash TEXT
+    `);
+
+    await client.query(`
+      ALTER TABLE lv_orders
+      ADD COLUMN IF NOT EXISTS delivery_city TEXT
+      NOT NULL DEFAULT ''
+    `);
+
+    await client.query(`
+      ALTER TABLE lv_orders
+      ADD COLUMN IF NOT EXISTS delivery_terms JSONB
     `);
 
     await client.query(`
@@ -670,16 +898,9 @@ async function createProduct(data) {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       RETURNING *`,
       [
-        p.id,
-        p.name,
-        p.category,
-        p.description,
-        p.priceRub,
-        p.oldPriceRub,
-        p.unit,
-        p.imageUrl,
-        p.available,
-        p.sortOrder
+        p.id, p.name, p.category, p.description,
+        p.priceRub, p.oldPriceRub, p.unit,
+        p.imageUrl, p.available, p.sortOrder
       ]
     );
 
@@ -718,17 +939,9 @@ async function updateProduct(id, data) {
        WHERE id = $1
        RETURNING *`,
       [
-        p.id,
-        p.name,
-        p.category,
-        p.description,
-        p.priceRub,
-        p.oldPriceProvided,
-        p.oldPriceRub,
-        p.unit,
-        p.imageUrl,
-        p.available,
-        p.sortOrder
+        p.id, p.name, p.category, p.description,
+        p.priceRub, p.oldPriceProvided, p.oldPriceRub,
+        p.unit, p.imageUrl, p.available, p.sortOrder
       ]
     );
 
@@ -745,7 +958,6 @@ async function updateProduct(id, data) {
 // -------------------- ПРОВЕРКА ЗАКАЗА --------------------
 
 function accessTokenHashFromInput(data) {
-  // Совместимость с приложением без отслеживания.
   if (data.orderAccessToken === undefined) {
     return null;
   }
@@ -798,6 +1010,9 @@ function normalizeOrder(data) {
     throw fail(400, "Укажите полный адрес доставки.");
   }
 
+  const deliveryCity =
+    normalizeDeliveryCity(data, fulfillment);
+
   if (
     !Array.isArray(data.items) ||
     data.items.length < 1 ||
@@ -844,8 +1059,13 @@ function normalizeOrder(data) {
     a.productId.localeCompare(b.productId)
   );
 
-  // Порядок полей важен для повторной отправки.
-  return {
+  /*
+   * Сохраняем прежний порядок и набор полей для
+   * заказов старого приложения без deliveryCity.
+   * Это позволяет проверять прежние pending_order
+   * без изменения их fingerprint.
+   */
+  const order = {
     requestId,
     name,
     phone,
@@ -854,6 +1074,13 @@ function normalizeOrder(data) {
     comment,
     items
   };
+
+  // Город входит в fingerprint новых заказов.
+  if (deliveryCity) {
+    order.deliveryCity = deliveryCity;
+  }
+
+  return order;
 }
 
 // -------------------- СОХРАНЕНИЕ ЗАКАЗА --------------------
@@ -901,6 +1128,9 @@ async function saveOrder(order, trackingTokenHash) {
       }
 
       await client.query("COMMIT");
+
+      // Возвращаем сохранённые цены и условия,
+      // не пересчитывая уже оформленный заказ.
       return { row, created: false };
     }
 
@@ -939,7 +1169,6 @@ async function saveOrder(order, trackingTokenHash) {
         );
       }
 
-      // Старая цена НЕ используется в расчёте.
       const priceKopecks = Number(product.price_rub) * 100;
       const lineKopecks = priceKopecks * item.quantity;
 
@@ -970,6 +1199,17 @@ async function saveOrder(order, trackingTokenHash) {
       throw fail(400, "Недопустимая сумма заказа.");
     }
 
+    const deliveryCity = order.deliveryCity || "";
+
+    // Условия считаются по серверной сумме.
+    // Переданные клиентом freeDelivery, totalRub
+    // и стоимость доставки не используются.
+    const deliveryInfo = calculateDeliveryInfo(
+      order.fulfillment,
+      deliveryCity,
+      totalKopecks
+    );
+
     const id = `LV-${crypto.randomUUID()}`;
 
     const result = await client.query(
@@ -977,9 +1217,12 @@ async function saveOrder(order, trackingTokenHash) {
         id, request_id, fingerprint,
         customer_name, phone, fulfillment,
         address, comment, items, total_rub,
-        tracking_token_hash
+        tracking_token_hash, delivery_city, delivery_terms
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11)
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,
+        $9::jsonb,$10,$11,$12,$13::jsonb
+      )
       RETURNING *`,
       [
         id,
@@ -992,7 +1235,9 @@ async function saveOrder(order, trackingTokenHash) {
         order.comment,
         JSON.stringify(snapshot),
         (totalKopecks / 100).toFixed(2),
-        trackingTokenHash
+        trackingTokenHash,
+        deliveryCity,
+        JSON.stringify(deliveryInfo)
       ]
     );
 
@@ -1025,13 +1270,19 @@ async function notifyTelegram(row) {
       );
     });
 
-    const deliveryText =
+    const deliveryInfo = storedDeliveryInfo(row);
+
+    const receivingLines =
       row.fulfillment === "pickup"
-        ? `Самовывоз: ${PICKUP}`
-        : Number(row.total_rub) >= 2000
-          ? "Бесплатная доставка по Макеевке, Донецку " +
-            "и Харцызску. Другие города — по согласованию."
-          : "Стоимость доставки согласуется с покупателем.";
+        ? [
+            "Получение: самовывоз",
+            `Адрес: ${PICKUP}`
+          ]
+        : [
+            "Получение: доставка",
+            `Город: ${row.delivery_city || "не выбран в приложении"}`,
+            `Адрес: ${row.address}`
+          ];
 
     const message = [
       "НОВЫЙ ЗАКАЗ — ЛАВКА ВКУСА",
@@ -1039,14 +1290,12 @@ async function notifyTelegram(row) {
       "",
       `Покупатель: ${row.customer_name}`,
       `Телефон: ${row.phone}`,
-      row.fulfillment === "delivery"
-        ? `Доставка: ${row.address}`
-        : "Получение: самовывоз",
+      ...receivingLines,
       "",
       ...itemLines,
       "",
       `Товары: ${rub(row.total_rub)}`,
-      deliveryText,
+      deliveryInfo.message,
       "Оплата при получении.",
       row.comment ? `Комментарий: ${row.comment}` : ""
     ].join("\n");
@@ -1128,7 +1377,7 @@ async function lookupCustomerOrder(data) {
     `SELECT
        id, order_number, created_at, updated_at,
        fulfillment, items, total_rub, status,
-       tracking_token_hash
+       tracking_token_hash, delivery_city, delivery_terms
      FROM lv_orders
      WHERE id = $1`,
     [id]
@@ -1351,7 +1600,6 @@ async function handle(req, res) {
   const url = new URL(req.url, "http://localhost");
   const pathname = url.pathname;
 
-  // Проверка сервера.
   if (
     req.method === "GET" &&
     (pathname === "/" || pathname === "/health")
@@ -1368,11 +1616,21 @@ async function handle(req, res) {
       imageUploadConfigured: cloudinaryConfigured(),
       quantityStepsEnabled: true,
       orderTrackingEnabled: true,
-      promotionsEnabled: true
+      promotionsEnabled: true,
+      deliveryCitiesEnabled: true
     });
   }
 
-  // Каталог покупателя.
+  if (
+    req.method === "GET" &&
+    pathname === "/api/delivery-options"
+  ) {
+    return json(res, 200, {
+      ok: true,
+      deliveryOptions: deliveryOptions()
+    });
+  }
+
   if (
     req.method === "GET" &&
     pathname === "/api/products"
@@ -1385,11 +1643,11 @@ async function handle(req, res) {
 
     return json(res, 200, {
       products: result.rows.map(productView),
-      promotionsEnabled: true
+      promotionsEnabled: true,
+      deliveryOptions: deliveryOptions()
     });
   }
 
-  // Категории.
   if (
     req.method === "GET" &&
     pathname === "/api/categories"
@@ -1406,7 +1664,6 @@ async function handle(req, res) {
     });
   }
 
-  // Защищённый просмотр статуса покупателем.
   if (
     req.method === "POST" &&
     pathname === "/api/orders/lookup"
@@ -1420,7 +1677,6 @@ async function handle(req, res) {
     });
   }
 
-  // Оформление заказа.
   if (
     req.method === "POST" &&
     pathname === "/api/orders"
@@ -1443,6 +1699,8 @@ async function handle(req, res) {
       totalRub: Number(saved.row.total_rub),
       status: saved.row.status,
       telegramStatus,
+      deliveryCity: saved.row.delivery_city || "",
+      deliveryInfo: storedDeliveryInfo(saved.row),
       orderTrackingAvailable: Boolean(
         trackingTokenHash &&
         sameHash(
@@ -1454,7 +1712,6 @@ async function handle(req, res) {
     });
   }
 
-  // Страница панели продавца.
   if (
     req.method === "GET" &&
     (pathname === "/admin" || pathname === "/admin/")
@@ -1486,11 +1743,9 @@ async function handle(req, res) {
     return res.end(html);
   }
 
-  // Все маршруты продавца требуют секретный ключ.
   if (pathname.startsWith("/api/admin/")) {
     checkAdmin(req);
 
-    // Возможности сервера для админки.
     if (
       req.method === "GET" &&
       pathname === "/api/admin/config"
@@ -1506,11 +1761,12 @@ async function handle(req, res) {
         quantityStepsEnabled: true,
         orderTrackingEnabled: true,
         promotionsEnabled: true,
-        oldPriceField: "oldPriceRub"
+        oldPriceField: "oldPriceRub",
+        deliveryCitiesEnabled: true,
+        deliveryOptions: deliveryOptions()
       });
     }
 
-    // Загрузка фотографии.
     if (
       req.method === "POST" &&
       pathname === "/api/admin/images"
@@ -1546,7 +1802,6 @@ async function handle(req, res) {
       }
     }
 
-    // Все товары для продавца.
     if (
       req.method === "GET" &&
       pathname === "/api/admin/products"
@@ -1562,7 +1817,6 @@ async function handle(req, res) {
       });
     }
 
-    // Добавление товара.
     if (
       req.method === "POST" &&
       pathname === "/api/admin/products"
@@ -1576,7 +1830,6 @@ async function handle(req, res) {
       });
     }
 
-    // Изменение товара.
     const productMatch = pathname.match(
       /^\/api\/admin\/products\/([a-z0-9_-]{1,80})$/
     );
@@ -1594,7 +1847,6 @@ async function handle(req, res) {
       });
     }
 
-    // Список заказов.
     if (
       req.method === "GET" &&
       pathname === "/api/admin/orders"
@@ -1607,13 +1859,12 @@ async function handle(req, res) {
 
       const page = Number(rawPage);
       const pageSize = 50;
-      const offset = (page - 1) * pageSize;
 
       const result = await pool.query(
         `SELECT * FROM lv_orders
          ORDER BY created_at DESC, id DESC
          LIMIT $1 OFFSET $2`,
-        [pageSize, offset]
+        [pageSize, (page - 1) * pageSize]
       );
 
       return json(res, 200, {
@@ -1623,7 +1874,6 @@ async function handle(req, res) {
       });
     }
 
-    // Смена статуса заказа.
     const statusMatch = pathname.match(
       /^\/api\/admin\/orders\/(LV-[0-9a-f-]{36})\/status$/
     );
@@ -1682,7 +1932,6 @@ const server = http.createServer((req, res) => {
         : 500;
 
     if (status === 500) {
-      // Не выводим содержимое заказа и секреты в журнал.
       const code =
         typeof error.code === "string"
           ? error.code
@@ -1712,7 +1961,6 @@ server.on("error", (error) => {
     "Ошибка HTTP-сервера:",
     error.code || "UNKNOWN"
   );
-
   process.exit(1);
 });
 
@@ -1721,14 +1969,15 @@ async function start() {
     await initializeDatabase();
 
     server.listen(PORT, "0.0.0.0", () => {
-      console.log(`Лавка Вкуса: сервер запущен на порту ${PORT}`);
-      console.log("Поддержка акций включена.");
+      console.log(
+        `Лавка Вкуса: сервер запущен на порту ${PORT}`
+      );
+      console.log("Акции и выбор города доставки включены.");
     });
   } catch (error) {
     console.error(
-      "Не удалось подготовить базу данных:",
-      error.code || "UNKNOWN",
-      error.message
+      "Не удалось подготовить базу данных. Код:",
+      error.code || "UNKNOWN"
     );
 
     await pool.end().catch(() => {});
