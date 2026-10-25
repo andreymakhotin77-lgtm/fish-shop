@@ -24,6 +24,23 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          def replace_exact_line(source, old_line, new_text, label):
+              lines = source.splitlines(keepends=True)
+              matches = [
+                  index
+                  for index, line in enumerate(lines)
+                  if line.rstrip("\r\n") == old_line
+              ]
+
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f"{label}: expected one matching line, "
+                      f"found {len(matches)}. No files changed."
+                  )
+
+              lines[matches[0]] = new_text.rstrip("\n") + "\n"
+              return "".join(lines)
+
           store_path = Path("android/StoreActivity.java")
           settings_path = Path("android/ShopSettings.java")
           main_path = Path("android/MainActivity.java")
@@ -38,34 +55,33 @@ jobs:
 
           if "public void openShopSettings()" not in main:
               raise SystemExit(
-                  "Update MainActivity.java before running this workflow"
+                  "Update MainActivity.java before running this workflow."
               )
 
           profile_marker = "// LAVKA_SHOP_SETTINGS_LINK"
 
           if profile_marker not in store:
               anchor = '        section("Мой профиль");'
-              if store.count(anchor) != 1:
-                  raise SystemExit(
-                      "Profile structure differs. No files changed."
-                  )
 
-              addition = '''
-                  // LAVKA_SHOP_SETTINGS_LINK
-                  content.addView(secondary(
-                          "Настройки приложения  ›",
-                          () -> {
-                              if (this instanceof MainActivity) {
-                                  ((MainActivity) this).openShopSettings();
-                              }
-                          }
-                  ));
-          '''
-
-              store = store.replace(
+              addition = "\n".join([
                   anchor,
-                  anchor + "\n" + addition,
-                  1
+                  "",
+                  "        // LAVKA_SHOP_SETTINGS_LINK",
+                  "        content.addView(secondary(",
+                  '                "Настройки приложения  ›",',
+                  "                () -> {",
+                  "                    if (this instanceof MainActivity) {",
+                  "                        ((MainActivity) this).openShopSettings();",
+                  "                    }",
+                  "                }",
+                  "        ));",
+              ])
+
+              store = replace_exact_line(
+                  store,
+                  anchor,
+                  addition,
+                  "Profile structure check"
               )
 
           lifecycle_marker = "// LAVKA_SETTINGS_DIALOG_LIFECYCLE"
@@ -73,83 +89,85 @@ jobs:
           if lifecycle_marker not in settings:
               class_anchor = "public final class ShopSettings {"
 
-              if settings.count(class_anchor) != 1:
-                  raise SystemExit(
-                      "ShopSettings class differs. No files changed."
-                  )
-
-              lifecycle = '''
-              // LAVKA_SETTINGS_DIALOG_LIFECYCLE
-              private static AlertDialog activeDialog;
-
-              public static void dismiss() {
-                  AlertDialog previous = activeDialog;
-                  activeDialog = null;
-
-                  if (previous != null && previous.isShowing()) {
-                      previous.dismiss();
-                  }
-              }
-          '''
-
-              settings = settings.replace(
+              lifecycle = "\n".join([
                   class_anchor,
-                  class_anchor + "\n" + lifecycle,
-                  1
+                  "",
+                  "    // LAVKA_SETTINGS_DIALOG_LIFECYCLE",
+                  "    private static AlertDialog activeDialog;",
+                  "",
+                  "    public static void dismiss() {",
+                  "        AlertDialog previous = activeDialog;",
+                  "        activeDialog = null;",
+                  "",
+                  "        if (previous != null && previous.isShowing()) {",
+                  "            previous.dismiss();",
+                  "        }",
+                  "    }",
+              ])
+
+              settings = replace_exact_line(
+                  settings,
+                  class_anchor,
+                  lifecycle,
+                  "ShopSettings class check"
               )
 
-              main_show = "        dialog.show();"
+              settings = replace_exact_line(
+                  settings,
+                  "        dialog.show();",
+                  "\n".join([
+                      "        activeDialog = dialog;",
+                      "        dialog.show();",
+                  ]),
+                  "Settings dialog check"
+              )
 
-              if settings.count(main_show) != 1:
+              settings = replace_exact_line(
+                  settings,
+                  "        new AlertDialog.Builder(",
+                  "        AlertDialog choice = new AlertDialog.Builder(",
+                  "Delay chooser check"
+              )
+
+              settings = replace_exact_line(
+                  settings,
+                  "                .show();",
+                  "\n".join([
+                      "                .create();",
+                      "",
+                      "        activeDialog = choice;",
+                      "        choice.show();",
+                  ]),
+                  "Delay chooser ending check"
+              )
+
+          required_settings_fragments = [
+              lifecycle_marker,
+              "public static void dismiss()",
+              "activeDialog = dialog;",
+              "AlertDialog choice = new AlertDialog.Builder(",
+              "activeDialog = choice;",
+              "choice.show();",
+          ]
+
+          for fragment in required_settings_fragments:
+              if fragment not in settings:
                   raise SystemExit(
-                      "Settings dialog structure differs. No files changed."
+                      "Settings integration check failed. No files changed."
                   )
 
-              settings = settings.replace(
-                  main_show,
-                  "        activeDialog = dialog;\n" + main_show,
-                  1
+          if (
+              profile_marker not in store
+              or "((MainActivity) this).openShopSettings();" not in store
+          ):
+              raise SystemExit(
+                  "Profile integration check failed. No files changed."
               )
-
-              choice_start = "        new AlertDialog.Builder(\n"
-
-              if settings.count(choice_start) != 1:
-                  raise SystemExit(
-                      "Delay chooser structure differs. No files changed."
-                  )
-
-              settings = settings.replace(
-                  choice_start,
-                  "        AlertDialog choice = new AlertDialog.Builder(\n",
-                  1
-              )
-
-              choice_end = "                .show();"
-
-              if settings.count(choice_end) != 1:
-                  raise SystemExit(
-                      "Delay chooser ending differs. No files changed."
-                  )
-
-              settings = settings.replace(
-                  choice_end,
-                  "                .create();\n"
-                  "\n"
-                  "        activeDialog = choice;\n"
-                  "        choice.show();",
-                  1
-              )
-
-          if "public static void dismiss()" not in settings:
-              raise SystemExit("Settings lifecycle check failed")
-
-          if profile_marker not in store:
-              raise SystemExit("Profile integration check failed")
 
           store_path.write_text(store, encoding="utf-8")
           settings_path.write_text(settings, encoding="utf-8")
 
-          print("Settings connected successfully")
+          print("Settings connected successfully.")
           PY
 
       - name: Save changes
