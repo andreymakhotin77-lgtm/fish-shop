@@ -1,270 +1,154 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head><!DOCTYPE html>
-<html lang="ru">
 <head>
-  <meta charset="utf-8">
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1"
-  >
-  <meta name="referrer" content="no-referrer">
-  <title>Лавка Вкуса — управление</title>
-
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #121212;
-      --card: #202020;
-      --field: #161616;
-      --gold: #d4af37;
-      --text: #f4f1e8;
-      --muted: #bbb6a7;
-      --border: #45402e;
-      --red: #ff9898;
-      --green: #a4ddb0;
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font: 16px/1.5 system-ui, sans-serif;
-    }
-
-    [hidden] { display: none !important; }
-
-    main {
-      max-width: 1100px;
-      margin: auto;
-      padding: 20px 14px 60px;
-    }
-
-    header {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      margin-bottom: 22px;
-    }
-
-    .logo {
-      display: grid;
-      place-items: center;
-      width: 64px;
-      height: 64px;
-      flex-shrink: 0;
-      border: 1px solid var(--gold);
-      border-radius: 18px;
-      color: var(--gold);
-      font-size: 26px;
-      font-weight: 800;
-    }
-
-    h1 {
-      margin: 0;
-      color: var(--gold);
-      font-size: 25px;
-    }
-
-    h2 { margin-top: 0; font-size: 21px; }
-
-    h3 {
-      margin: 0 0 8px;
-      font-size: 18px;
-      overflow-wrap: anywhere;
-    }
-
-    p { margin: 8px 0; }
-    .muted, small { color: var(--muted); }
-
-    .panel, .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 18px;
-      margin-bottom: 16px;
-    }
-
-    label {
-      display: block;
-      margin-bottom: 14px;
-    }
-
-    fieldset {
-      border: 0;
-      padding: 0;
-      margin: 0;
-      min-width: 0;
-    }
-
-    input, select, textarea, button { font: inherit; }
-
-    input:not([type="checkbox"]), select, textarea {
-      display: block;
-      width: 100%;
-      margin-top: 6px;
-      padding: 12px;
-      color: var(--text);
-      background: var(--field);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-    }
-
-    input[readonly] { color: var(--muted); }
-
-    input:focus, select:focus, textarea:focus,
-    button:focus-visible {
-      outline: 2px solid var(--gold);
-      outline-offset: 2px;
-    }
-
-    textarea {
-      min-height: 100px;
-      resize: vertical;
-    }
-
-    button {
-      padding: 11px 16px;
-      border: 1px solid var(--gold);
-      border-radius: 10px;
-      background: var(--gold);
-      color: #15130c;
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    button.secondary {
-      background: transparent;
-      color: var(--gold);
-    }
-
-    button:disabled {
-      cursor: not-allowed;
-      opacity: .5;
-    }
-
-    .row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0 16px;
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 18px;
-      align-items: start;
-    }
-
-    .check {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .check input {
-      width: 20px;
-      height: 20px;
-      accent-color: var(--gold);
-    }
-
-    .message {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      color: var(--muted);
-      margin: 12px 0;
-    }
-
-    .message.error { color: var(--red); }
-    .message.success { color: var(--green); }
-
-    .price {
-      color: var(--gold);
-      font-weight: 800;
-      font-size: 22px;
-    }
-
-    .old-price {
-      color: var(--muted);
-      text-decoration: line-through;
-      margin-left: 8px;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 3px 9px;
-      margin: 5px 0;
-      border-radius: 8px;
-      background: var(--gold);
-      color: #15130c;
-      font-weight: 800;
-      font-size: 13px;
-    }
-
-    .badge.closed {
-      background: var(--border);
-      color: var(--text);
-    }
-
-    .preview {
-      display: block;
-      width: 100%;
-      max-height: 260px;
-      object-fit: contain;
-      background: #161616;
-      border-radius: 12px;
-      margin: 12px 0;
-    }
-
-    .product-image {
-      width: 100%;
-      height: 170px;
-      object-fit: cover;
-      background: #161616;
-      border-radius: 10px;
-      margin-bottom: 12px;
-    }
-
-    .order-lines { padding-left: 22px; }
-    .order-lines li { margin-bottom: 8px; }
-    .order-status { max-width: 280px; }
-
-    .note {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-
-    .slot-note {
-      border-left: 3px solid var(--gold);
-      padding-left: 12px;
-      margin: 14px 0;
-    }
-
-    a { color: var(--gold); }
-    nav { margin-bottom: 16px; }
-
-    nav button[aria-pressed="true"] {
-      background: var(--gold);
-      color: #15130c;
-    }
-
-    @media (max-width: 760px) {
-      .layout, .grid { grid-template-columns: 1fr; }
-      h1 { font-size: 22px; }
-      .panel, .card { padding: 15px; }
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Лавка Вкуса — управление</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #121212;
+  --card: #202020;
+  --field: #161616;
+  --gold: #d4af37;
+  --text: #f4f1e8;
+  --muted: #bbb6a7;
+  --border: #45402e;
+  --red: #ff9898;
+  --green: #a4ddb0;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 system-ui, sans-serif;
+}
+main {
+  max-width: 1100px;
+  margin: auto;
+  padding: 20px 14px 60px;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.logo {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border: 1px solid var(--gold);
+  border-radius: 18px;
+  color: var(--gold);
+  font-size: 26px;
+  font-weight: 800;
+}
+h1 { margin: 0; color: var(--gold); font-size: 25px; }
+h2 { margin-top: 0; font-size: 21px; }
+h3 { margin: 0 0 8px; font-size: 18px; overflow-wrap: anywhere; }
+p { margin: 8px 0; }
+.muted, small { color: var(--muted); }
+.panel, .card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+label { display: block; margin-bottom: 14px; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+input, select, textarea, button { font: inherit; }
+input:not([type="checkbox"]), select, textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+input[readonly] { color: var(--muted); }
+input:focus, select:focus, textarea:focus, button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+textarea { min-height: 100px; resize: vertical; }
+button {
+  padding: 11px 16px;
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  background: var(--gold);
+  color: #15130c;
+  font-weight: 700;
+  cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--gold); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.check { display: flex; align-items: center; gap: 10px; }
+.check input { width: 20px; height: 20px; accent-color: var(--gold); }
+.message, .note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.message { color: var(--muted); margin: 12px 0; }
+.message.error { color: var(--red); }
+.message.success { color: var(--green); }
+.price { color: var(--gold); font-weight: 800; font-size: 22px; }
+.old { color: var(--muted); text-decoration: line-through; margin-left: 8px; }
+.badge {
+  display: inline-block;
+  background: var(--gold);
+  color: #15130c;
+  padding: 3px 9px;
+  border-radius: 8px;
+  margin: 5px 0;
+  font-weight: 800;
+  font-size: 13px;
+}
+.badge.closed { background: var(--border); color: var(--text); }
+.preview {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  background: var(--field);
+  border-radius: 12px;
+  margin: 12px 0;
+}
+.product-image {
+  width: 100%;
+  height: 170px;
+  object-fit: cover;
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+.slot-note { border-left: 3px solid var(--gold); padding-left: 12px; }
+a { color: var(--gold); }
+nav { margin-bottom: 16px; }
+.order-status { max-width: 280px; }
+@media (max-width: 760px) {
+  .layout, .grid { grid-template-columns: 1fr; }
+  h1 { font-size: 22px; }
+  .panel, .card { padding: 15px; }
+}
+</style>
 </head>
-
 <body>
 <main>
   <header>
@@ -277,105 +161,57 @@
 
   <section id="loginPanel" class="panel">
     <h2>Вход</h2>
-
     <form id="loginForm">
       <label>
         Секретный ключ продавца
-        <input
-          id="adminToken"
-          type="password"
-          minlength="32"
-          required
-          autocomplete="off"
-          spellcheck="false"
-        >
+        <input id="adminToken" type="password" minlength="32"
+               required autocomplete="off" spellcheck="false">
       </label>
-
       <button id="loginButton" type="submit">Войти</button>
     </form>
-
     <p class="muted">
       Используйте ADMIN_TOKEN из настроек Render.
       Ключ не сохраняется в хранилище браузера.
-      После обновления страницы потребуется войти заново.
+      После обновления страницы войдите заново.
     </p>
-
     <p class="muted">
-      Первый запрос после простоя может занять около минуты.
+      Первый запрос после простоя сервера может занять около минуты.
     </p>
-
     <div id="loginMessage" class="message" role="status"></div>
   </section>
 
   <section id="appPanel" hidden>
-    <nav class="row" aria-label="Разделы панели">
-      <button
-        id="productsTab"
-        type="button"
-        aria-pressed="true"
-      >Товары</button>
-
-      <button
-        id="ordersTab"
-        type="button"
-        class="secondary"
-        aria-pressed="false"
-      >Заказы</button>
-
-      <button
-        id="scheduleTab"
-        type="button"
-        class="secondary"
-        aria-pressed="false"
-      >Расписание</button>
-
-      <button
-        id="logoutButton"
-        type="button"
-        class="secondary"
-      >Выйти</button>
+    <nav class="row" aria-label="Разделы">
+      <button id="productsTab" type="button">Товары</button>
+      <button id="ordersTab" type="button" class="secondary">Заказы</button>
+      <button id="scheduleTab" type="button" class="secondary">Расписание</button>
+      <button id="logoutButton" type="button" class="secondary">Выйти</button>
     </nav>
 
     <div id="globalMessage" class="message" role="status"></div>
-
-    <!-- ТОВАРЫ -->
 
     <section id="productsSection">
       <div class="layout">
         <section class="panel">
           <h2 id="editorTitle">Новый товар</h2>
-
           <form id="productForm">
             <fieldset id="productFields">
               <label>
                 Код товара
-                <input
-                  id="productId"
-                  readonly
-                  placeholder="Создаётся автоматически"
-                >
+                <input id="productId" readonly
+                       placeholder="Создаётся автоматически">
               </label>
-
               <label>
                 Название
-                <input
-                  id="productName"
-                  minlength="2"
-                  maxlength="120"
-                  required
-                >
+                <input id="productName" minlength="2"
+                       maxlength="120" required>
               </label>
-
               <div class="grid">
                 <label>
                   Категория
-                  <input
-                    id="productCategory"
-                    maxlength="80"
-                    value="Рыба и морепродукты"
-                  >
+                  <input id="productCategory" maxlength="80"
+                         value="Рыба и морепродукты">
                 </label>
-
                 <label>
                   Единица продажи
                   <select id="productUnit">
@@ -385,265 +221,136 @@
                   </select>
                 </label>
               </div>
-
               <div class="grid">
                 <label>
                   Текущая цена, ₽
-                  <input
-                    id="productPrice"
-                    type="number"
-                    min="1"
-                    max="1000000"
-                    step="1"
-                    required
-                  >
+                  <input id="productPrice" type="number"
+                         min="1" max="1000000" step="1" required>
                 </label>
-
                 <label>
                   Старая цена, ₽ — необязательно
-                  <input
-                    id="productOldPrice"
-                    type="number"
-                    min="1"
-                    max="1000000"
-                    step="1"
-                    placeholder="Без акции"
-                  >
+                  <input id="productOldPrice" type="number"
+                         min="1" max="1000000" step="1"
+                         placeholder="Без акции">
                 </label>
               </div>
-
               <p class="muted">
-                Продажа идёт по текущей цене.
                 Для акции укажите реальную прежнюю цену выше текущей.
                 Чтобы убрать акцию, очистите старую цену.
               </p>
-
               <div id="promotionPreview" class="message"></div>
-
               <label>
                 Порядок в каталоге
-                <input
-                  id="productSort"
-                  type="number"
-                  min="-100000"
-                  max="100000"
-                  step="1"
-                  value="0"
-                  required
-                >
+                <input id="productSort" type="number"
+                       min="-100000" max="100000" step="1"
+                       value="0" required>
               </label>
-
               <label>
                 Описание
-                <textarea
-                  id="productDescription"
-                  maxlength="2000"
-                ></textarea>
+                <textarea id="productDescription" maxlength="2000"></textarea>
               </label>
-
               <label>
                 Ссылка на фотографию
-                <input
-                  id="productImageUrl"
-                  type="url"
-                  maxlength="1500"
-                  placeholder="https://..."
-                >
+                <input id="productImageUrl" type="url"
+                       maxlength="1500" placeholder="https://...">
               </label>
-
-              <img
-                id="imagePreview"
-                class="preview"
-                alt="Предпросмотр фотографии"
-                referrerpolicy="no-referrer"
-                hidden
-              >
-
+              <img id="imagePreview" class="preview"
+                   alt="Предпросмотр фотографии"
+                   referrerpolicy="no-referrer" hidden>
               <label>
-                Выбрать фотографию с телефона
-                <input
-                  id="imageFile"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                >
+                Фотография с телефона
+                <input id="imageFile" type="file"
+                       accept="image/jpeg,image/png,image/webp">
               </label>
-
               <p class="muted">
                 JPG, PNG или WEBP, до 5 МБ.
                 Сначала загрузите фото, затем сохраните товар.
               </p>
-
               <div class="row">
-                <button
-                  id="uploadImageButton"
-                  type="button"
-                  class="secondary"
-                >Загрузить фото</button>
-
-                <button
-                  id="removeImageButton"
-                  type="button"
-                  class="secondary"
-                >Убрать фото</button>
+                <button id="uploadImageButton" type="button"
+                        class="secondary">Загрузить фото</button>
+                <button id="removeImageButton" type="button"
+                        class="secondary">Убрать фото</button>
               </div>
-
-              <div
-                id="imageMessage"
-                class="message"
-                role="status"
-              ></div>
-
+              <div id="imageMessage" class="message" role="status"></div>
               <label class="check">
-                <input
-                  id="productAvailable"
-                  type="checkbox"
-                  checked
-                >
+                <input id="productAvailable" type="checkbox" checked>
                 Товар в наличии
               </label>
-
               <p class="muted">
                 Снимите отметку, чтобы скрыть товар из каталога.
               </p>
-
               <div class="row">
-                <button
-                  id="saveProductButton"
-                  type="submit"
-                >Сохранить товар</button>
-
-                <button
-                  id="newProductButton"
-                  type="button"
-                  class="secondary"
-                >Новый товар</button>
+                <button type="submit">Сохранить товар</button>
+                <button id="newProductButton" type="button"
+                        class="secondary">Новый товар</button>
               </div>
             </fieldset>
-
-            <div
-              id="productMessage"
-              class="message"
-              role="status"
-            ></div>
+            <div id="productMessage" class="message" role="status"></div>
           </form>
         </section>
-
         <section>
           <div class="row">
             <h2>Ассортимент</h2>
-
-            <button
-              id="refreshProductsButton"
-              type="button"
-              class="secondary"
-            >Обновить</button>
+            <button id="refreshProductsButton" type="button"
+                    class="secondary">Обновить</button>
           </div>
-
-          <div
-            id="productsMessage"
-            class="message"
-            role="status"
-          ></div>
-
+          <div id="productsMessage" class="message" role="status"></div>
           <div id="productsList"></div>
         </section>
       </div>
     </section>
 
-    <!-- ЗАКАЗЫ -->
-
     <section id="ordersSection" hidden>
       <div class="row">
         <h2>Заказы</h2>
-
-        <button
-          id="refreshOrdersButton"
-          type="button"
-          class="secondary"
-        >Обновить</button>
+        <button id="refreshOrdersButton" type="button"
+                class="secondary">Обновить</button>
       </div>
-
       <p class="muted">
-        Статус покупатель увидит после обновления в разделе
-        «Мои заказы». Изменение статуса здесь само по себе
-        не отправляет уведомление в Telegram.
+        Покупатель увидит статус после обновления в «Моих заказах».
+        Изменение статуса здесь не отправляет уведомление в Telegram.
       </p>
-
-      <div
-        id="ordersMessage"
-        class="message"
-        role="status"
-      ></div>
-
+      <div id="ordersMessage" class="message" role="status"></div>
       <div id="ordersList"></div>
-
       <div class="row">
-        <button
-          id="previousPageButton"
-          type="button"
-          class="secondary"
-          disabled
-        >Назад</button>
-
+        <button id="previousPageButton" type="button"
+                class="secondary" disabled>Назад</button>
         <span id="pageLabel">Страница 1</span>
-
-        <button
-          id="nextPageButton"
-          type="button"
-          class="secondary"
-          disabled
-        >Далее</button>
+        <button id="nextPageButton" type="button"
+                class="secondary" disabled>Далее</button>
       </div>
     </section>
-
-    <!-- РАСПИСАНИЕ -->
 
     <section id="scheduleSection" hidden>
       <section class="panel">
         <h2>Расписание получения</h2>
-
-        <p>
-          Время местное: <strong>московское, UTC+3</strong>.
-          Доставка и самовывоз настраиваются отдельно.
-        </p>
-
+        <p><strong>Московское время, UTC+3.</strong></p>
+        <p>Доставка и самовывоз настраиваются отдельно.</p>
         <p class="muted">
-          Каждый интервал относится к конкретной дате.
-          Можно настроить сегодня и ближайшие 60 дней.
-          Один интервал доступен нескольким покупателям:
-          лимита количества заказов пока нет.
+          Интервалы создаются на конкретную дату:
+          на сегодня и ближайшие 60 дней.
+          Один интервал может выбрать несколько покупателей.
         </p>
-
         <p class="muted">
-          Изменение или закрытие интервала не переносит
-          уже оформленные заказы. Согласуйте изменения
-          с покупателями отдельно. Для других городов
-          возможность доставки также согласуется отдельно.
+          Изменение или закрытие интервала не переносит старые заказы.
+          Согласуйте изменения с покупателями отдельно.
+          Для других городов возможность доставки согласуется отдельно.
         </p>
-
-        <div
-          id="scheduleUnavailable"
-          class="message error"
-          hidden
-        >
+        <div id="scheduleUnavailable" class="message error" hidden>
           Сервер не сообщил о поддержке расписания.
-          Проверьте обновление server.js.
         </div>
       </section>
-
       <div class="layout">
         <section class="panel">
           <h2 id="slotEditorTitle">Новый интервал</h2>
-
           <form id="slotForm">
             <fieldset id="slotFields">
               <input id="slotId" type="hidden">
-
               <label>
                 Дата
                 <input id="slotDate" type="date" required>
               </label>
-
               <label>
                 Способ получения
                 <select id="slotFulfillment">
@@ -651,73 +358,42 @@
                   <option value="pickup">Самовывоз</option>
                 </select>
               </label>
-
               <div class="grid">
                 <label>
                   Начало
-                  <input
-                    id="slotStart"
-                    type="time"
-                    step="60"
-                    required
-                  >
+                  <input id="slotStart" type="time" step="60" required>
                 </label>
-
                 <label>
                   Окончание
-                  <input
-                    id="slotEnd"
-                    type="time"
-                    step="60"
-                    required
-                  >
+                  <input id="slotEnd" type="time" step="60" required>
                 </label>
               </div>
-
               <p class="muted">
-                Время — UTC+3, независимо от настроек телефона.
-                Начало и окончание должны быть в один день.
-                Открыть уже начавшийся интервал нельзя.
+                Начало и окончание — в один день.
+                Уже начавшийся интервал открыть нельзя.
+                Для проверки удобно выбрать завтрашнюю дату.
               </p>
-
               <label class="check">
                 <input id="slotEnabled" type="checkbox" checked>
                 Открыт для новых заказов
               </label>
-
               <div class="row">
-                <button
-                  id="saveSlotButton"
-                  type="submit"
-                >Сохранить интервал</button>
-
-                <button
-                  id="newSlotButton"
-                  type="button"
-                  class="secondary"
-                >Новый интервал</button>
+                <button id="saveSlotButton" type="submit">
+                  Сохранить интервал
+                </button>
+                <button id="newSlotButton" type="button"
+                        class="secondary">Новый интервал</button>
               </div>
             </fieldset>
-
-            <div
-              id="slotMessage"
-              class="message"
-              role="status"
-            ></div>
+            <div id="slotMessage" class="message" role="status"></div>
           </form>
         </section>
-
         <section>
           <div class="row">
-            <h2>Интервалы</h2>
-
-            <button
-              id="refreshSlotsButton"
-              type="button"
-              class="secondary"
-            >Обновить</button>
+            <h2>Сохранённые интервалы</h2>
+            <button id="refreshSlotsButton" type="button"
+                    class="secondary">Обновить</button>
           </div>
-
           <div class="grid">
             <label>
               Способ получения
@@ -727,7 +403,6 @@
                 <option value="pickup">Самовывоз</option>
               </select>
             </label>
-
             <label>
               Показывать
               <select id="slotsStateFilter">
@@ -738,18 +413,10 @@
               </select>
             </label>
           </div>
-
           <p class="muted">
-            Список включает последние 7 дней и ближайшие 60 дней.
-            Старые интервалы остаются в базе.
+            Здесь показаны последние 7 дней и ближайшие 60 дней.
           </p>
-
-          <div
-            id="slotsMessage"
-            class="message"
-            role="status"
-          ></div>
-
+          <div id="slotsMessage" class="message" role="status"></div>
           <div id="slotsList"></div>
         </section>
       </div>
@@ -760,36 +427,32 @@
 <script>
 "use strict";
 
-const $ = (id) => document.getElementById(id);
-
-const STORE_TIME_ZONE = "Europe/Moscow";
-const SLOT_ID_PATTERN =
+(() => {
+const $ = id => document.getElementById(id);
+const ZONE = "Europe/Moscow";
+const SLOT_ID =
   /^slot-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 let token = "";
-let sessionVersion = 0;
-let editorVersion = 0;
-let productsRequestVersion = 0;
-let slotsRequestVersion = 0;
-
+let session = 0;
+let productRequest = 0;
+let slotRequest = 0;
+let editor = 0;
 let products = [];
 let slots = [];
-
-let ordersPage = 1;
+let page = 1;
 let ordersBusy = false;
+let hasNext = false;
+let productBusy = false;
 let uploading = false;
-let saving = false;
-let imageUploadConfigured = false;
-let schedulingEnabled = false;
-
+let productReview = false;
+let slotBusy = false;
 let slotsLoading = false;
-let slotSaving = false;
-let slotChanging = false;
-let slotNeedsReview = false;
-
-let localPreviewUrl = null;
-
-const activeRequests = new Set();
+let slotReview = false;
+let imagesEnabled = false;
+let scheduleEnabled = false;
+let previewUrl = null;
+const controllers = new Set();
 
 const statuses = {
   new: "Новый",
@@ -808,127 +471,87 @@ const telegramStatuses = {
   not_configured: "Не настроено"
 };
 
-const moneyFormatter = new Intl.NumberFormat("ru-RU", {
+const moneyFormat = new Intl.NumberFormat("ru-RU", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 });
-
-const quantityFormatter = new Intl.NumberFormat("ru-RU", {
+const quantityFormat = new Intl.NumberFormat("ru-RU", {
   maximumFractionDigits: 2
 });
+const storeDateFormat = new Intl.DateTimeFormat("en-GB", {
+  timeZone: ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit"
+});
 
-const storeDateFormatter = new Intl.DateTimeFormat(
-  "en-GB",
-  {
-    timeZone: STORE_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }
-);
+function node(tag, className = "", value) {
+  const result = document.createElement(tag);
+  if (className) result.className = className;
+  if (value !== undefined) result.textContent = value;
+  return result;
+}
+
+function button(title, action, secondary = true) {
+  const result = node("button", secondary ? "secondary" : "", title);
+  result.type = "button";
+  result.addEventListener("click", action);
+  return result;
+}
+
+function message(id, value = "", kind = "") {
+  $(id).textContent = value;
+  $(id).className = "message" + (kind ? " " + kind : "");
+}
 
 function money(value) {
-  if (value === null || value === undefined || value === "") {
-    return "—";
-  }
-
+  if (value === null || value === undefined || value === "") return "—";
   const number = Number(value);
-
-  return Number.isFinite(number)
-    ? moneyFormatter.format(number) + " ₽"
-    : "—";
+  return Number.isFinite(number) ? moneyFormat.format(number) + " ₽" : "—";
 }
 
 function quantity(value) {
   const number = Number(value);
-
-  return Number.isFinite(number)
-    ? quantityFormatter.format(number)
-    : "—";
+  return Number.isFinite(number) ? quantityFormat.format(number) : "—";
 }
 
-function message(id, value, kind = "") {
-  const node = $(id);
-  node.textContent = value || "";
-  node.className = "message" + (kind ? " " + kind : "");
-}
-
-function element(tag, className, value) {
-  const node = document.createElement(tag);
-
-  if (className) node.className = className;
-  if (value !== undefined) node.textContent = value;
-
-  return node;
-}
-
-function makeButton(title, action, secondary = true) {
-  const button = element(
-    "button",
-    secondary ? "secondary" : "",
-    title
-  );
-
-  button.type = "button";
-  button.addEventListener("click", action);
-
-  return button;
-}
-
-function isStale(error) {
-  return error && error.code === "STALE_SESSION";
-}
-
-function staleError() {
-  const error = new Error("Сеанс изменился.");
-  error.code = "STALE_SESSION";
-  return error;
-}
-
-function safeImageUrl(value) {
-  if (typeof value !== "string" || !value.trim()) {
-    return "";
-  }
-
+function safeUrl(value) {
   try {
-    const parsed = new URL(value);
-
-    if (
-      parsed.protocol !== "https:" ||
-      parsed.username ||
-      parsed.password
-    ) {
-      return "";
-    }
-
-    return parsed.href;
+    if (typeof value !== "string" || !value.trim()) return "";
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password
+      ? url.href : "";
   } catch {
     return "";
   }
 }
 
-async function api(route, options = {}) {
-  const version = sessionVersion;
-  const requestToken = token;
+function staleError() {
+  const error = new Error("Сеанс изменился.");
+  error.stale = true;
+  return error;
+}
 
-  if (!requestToken) {
-    throw new Error("Сначала войдите в панель.");
-  }
+function rejected(error) {
+  return Number.isInteger(error.statusCode) &&
+    error.statusCode >= 400 && error.statusCode < 500;
+}
+
+async function api(route, options = {}) {
+  const version = session;
+  const key = token;
+  if (!key) throw new Error("Войдите в панель.");
 
   const controller = new AbortController();
-  activeRequests.add(controller);
-
-  const timeout = setTimeout(
-    () => controller.abort(),
-    120000
-  );
+  controllers.add(controller);
+  const timer = setTimeout(() => controller.abort(), 120000);
 
   try {
     const settings = {
       method: options.method || "GET",
       headers: {
         Accept: "application/json",
-        Authorization: "Bearer " + requestToken
+        Authorization: "Bearer " + key
       },
       cache: "no-store",
       redirect: "error",
@@ -936,101 +559,71 @@ async function api(route, options = {}) {
     };
 
     if (options.body !== undefined) {
-      settings.headers["Content-Type"] =
-        "application/json; charset=utf-8";
-
+      settings.headers["Content-Type"] = "application/json; charset=utf-8";
       settings.body = JSON.stringify(options.body);
     }
 
     const response = await fetch(route, settings);
-
-    if (version !== sessionVersion) {
-      throw staleError();
-    }
+    if (version !== session) throw staleError();
 
     if (response.status === 401) {
       logout();
-
-      message(
-        "loginMessage",
-        "Сеанс завершён или ключ неверный. Войдите снова.",
-        "error"
-      );
-
+      message("loginMessage", "Ключ неверный или сеанс завершён.", "error");
       throw staleError();
     }
 
     let data;
-
     try {
       data = await response.json();
     } catch {
       throw new Error(
-        "Сервер вернул неожиданный ответ. " +
-        "Результат действия не подтверждён. Обновите список."
+        "Сервер вернул неожиданный ответ. Результат действия " +
+        "не подтверждён. Обновите список."
       );
     }
 
-    if (version !== sessionVersion) {
-      throw staleError();
-    }
-
-    if (
-      !data ||
-      typeof data !== "object" ||
-      Array.isArray(data)
-    ) {
-      throw new Error("Сервер вернул неожиданные данные.");
+    if (version !== session) throw staleError();
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new Error("Сервер вернул некорректные данные.");
     }
 
     if (!response.ok) {
       const error = new Error(
         typeof data.error === "string"
-          ? data.error
-          : "Ошибка сервера: " + response.status
+          ? data.error : "Ошибка сервера: " + response.status
       );
-
       error.statusCode = response.status;
       throw error;
     }
-
     return data;
-  } catch (error) {
-    if (version !== sessionVersion) {
-      throw staleError();
-    }
 
+  } catch (error) {
+    if (version !== session) throw staleError();
     if (error.name === "AbortError") {
       throw new Error(
-        "Время ожидания истекло. Результат запроса " +
-        "не подтверждён. Обновите список перед повторением."
+        "Время ожидания истекло. Результат не подтверждён. " +
+        "Обновите список перед повторением."
       );
     }
-
     if (error instanceof TypeError) {
       throw new Error(
-        "Не удалось связаться с сервером. " +
-        "Результат действия не подтверждён. " +
-        "Проверьте интернет и обновите список."
+        "Нет ответа сервера. Проверьте интернет. " +
+        "Действие могло сохраниться — сначала обновите список."
       );
     }
-
     throw error;
   } finally {
-    clearTimeout(timeout);
-    activeRequests.delete(controller);
+    clearTimeout(timer);
+    controllers.delete(controller);
   }
 }
 
 // -------------------- ДАТЫ --------------------
 
-function storeToday() {
-  const parts = storeDateFormatter.formatToParts(new Date());
-
-  const get = (type) =>
-    parts.find((part) => part.type === type).value;
-
-  return get("year") + "-" + get("month") + "-" + get("day");
+function today() {
+  const parts = storeDateFormat.formatToParts(new Date());
+  const part = type => parts.find(item => item.type === type).value;
+  return part("year") + "-" + part("month") + "-" + part("day");
 }
 
 function addDays(date, count) {
@@ -1040,198 +633,132 @@ function addDays(date, count) {
 }
 
 function validDate(value) {
-  if (
-    typeof value !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(value)
-  ) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return false;
   }
-
-  const parsed = new Date(value + "T00:00:00.000Z");
-
-  return (
-    Number.isFinite(parsed.getTime()) &&
-    parsed.toISOString().slice(0, 10) === value
-  );
+  const date = new Date(value + "T00:00:00.000Z");
+  return Number.isFinite(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value;
 }
 
 function validTime(value) {
-  return (
-    typeof value === "string" &&
-    /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
-  );
+  return typeof value === "string" &&
+    /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 function shortDate(value) {
   if (!validDate(value)) return "Дата не указана";
-
-  const parts = value.split("-");
-  return parts[2] + "." + parts[1] + "." + parts[0];
+  const [year, month, day] = value.split("-");
+  return day + "." + month + "." + year;
 }
 
 function dateLabel(value) {
   if (!value) return "Дата не указана";
-
   const date = new Date(value);
-
-  return Number.isNaN(date.getTime())
-    ? "Дата не указана"
-    : date.toLocaleString("ru-RU", {
-        timeZone: STORE_TIME_ZONE
-      }) + " (UTC+3)";
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleString("ru-RU", { timeZone: ZONE }) + " (UTC+3)"
+    : "Дата не указана";
 }
 
-function slotStarted(slot) {
-  const timestamp = Date.parse(
-    slot.date + "T" + slot.startTime + ":00+03:00"
-  );
-
-  return !Number.isFinite(timestamp) || timestamp <= Date.now();
+function started(slot) {
+  const value = Date.parse(slot.date + "T" + slot.startTime + ":00+03:00");
+  return !Number.isFinite(value) || value <= Date.now();
 }
 
-function slotDescription(slot) {
-  if (
-    !slot ||
-    !validDate(slot.date) ||
-    !validTime(slot.startTime) ||
-    !validTime(slot.endTime)
-  ) {
-    return "";
-  }
-
-  return (
-    shortDate(slot.date) + ", " +
-    slot.startTime + "–" + slot.endTime + " (UTC+3)"
-  );
+function slotLabel(slot) {
+  if (!slot || !validDate(slot.date) ||
+      !validTime(slot.startTime) || !validTime(slot.endTime)) return "";
+  return shortDate(slot.date) + ", " +
+    slot.startTime + "–" + slot.endTime + " (UTC+3)";
 }
 
-function fulfillmentTitle(value) {
+function modeLabel(value) {
   return value === "pickup" ? "Самовывоз" : "Доставка";
 }
 
-// -------------------- ТОВАРЫ --------------------
+// -------------------- ТОВАРЫ И ФОТО --------------------
 
-function releaseLocalPreview() {
-  if (localPreviewUrl) {
-    URL.revokeObjectURL(localPreviewUrl);
-    localPreviewUrl = null;
-  }
+function releasePreview() {
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = null;
 }
 
-function showPreview(url) {
+function preview(url) {
   const image = $("imagePreview");
-
-  if (!url) {
-    image.hidden = true;
-    image.removeAttribute("src");
-    return;
-  }
-
-  image.hidden = false;
-  image.src = url;
+  image.hidden = !url;
+  if (url) image.src = url;
+  else image.removeAttribute("src");
 }
 
 $("imagePreview").addEventListener("error", () => {
   $("imagePreview").hidden = true;
 });
 
-function updatePromotionPreview() {
-  const price = Number($("productPrice").value);
-  const raw = $("productOldPrice").value.trim();
+function syncProducts() {
+  $("productFields").disabled = productBusy || uploading;
+  $("uploadImageButton").disabled =
+    productBusy || uploading || !imagesEnabled;
+}
 
+function promotionPreview() {
+  const current = Number($("productPrice").value);
+  const raw = $("productOldPrice").value.trim();
   if (!raw) {
     message("promotionPreview", "Без акции.");
     return;
   }
 
-  const oldPrice = Number(raw);
-
-  if (
-    !Number.isInteger(price) ||
-    price < 1 ||
-    price > 1000000 ||
-    !Number.isInteger(oldPrice) ||
-    oldPrice <= price ||
-    oldPrice > 1000000
-  ) {
-    message(
-      "promotionPreview",
-      "Старая цена должна быть выше текущей " +
-      "и не больше 1000000 ₽.",
-      "error"
-    );
+  const old = Number(raw);
+  if (!Number.isInteger(current) || current < 1 || current > 1000000 ||
+      !Number.isInteger(old) || old <= current || old > 1000000) {
+    message("promotionPreview", "Старая цена должна быть выше текущей.", "error");
     return;
   }
 
-  const discount = Math.floor(
-    ((oldPrice - price) * 100) / oldPrice
-  );
-
+  const discount = Math.floor((old - current) * 100 / old);
   message(
     "promotionPreview",
-    (discount >= 1 ? "Скидка " + discount + "%" : "Акция") +
-    ": " + money(oldPrice) + " → " + money(price),
+    (discount ? "Скидка " + discount + "%" : "Акция") +
+    ": " + money(old) + " → " + money(current),
     "success"
   );
 }
 
-function syncEditorButtons() {
-  $("productFields").disabled = saving || uploading;
-
-  $("uploadImageButton").disabled =
-    uploading || saving || !imageUploadConfigured;
-}
-
-function resetEditor() {
-  editorVersion += 1;
-  releaseLocalPreview();
-
+function resetProduct() {
+  editor++;
+  productReview = false;
+  releasePreview();
   $("productForm").reset();
   $("productId").value = "";
   $("productCategory").value = "Рыба и морепродукты";
   $("productSort").value = "0";
   $("productAvailable").checked = true;
   $("editorTitle").textContent = "Новый товар";
-
-  showPreview("");
-  message("productMessage", "");
-  message("imageMessage", "");
-  updatePromotionPreview();
-  syncEditorButtons();
+  preview("");
+  message("productMessage");
+  message("imageMessage");
+  promotionPreview();
+  syncProducts();
 }
 
 function editProduct(product) {
-  if (saving || uploading) {
-    message(
-      "productsMessage",
-      "Дождитесь окончания сохранения или загрузки фото.",
-      "error"
-    );
-    return;
-  }
-
-  resetEditor();
-
+  if (productBusy || uploading) return;
+  resetProduct();
   $("editorTitle").textContent = "Редактирование товара";
   $("productId").value = product.id || "";
   $("productName").value = product.name || "";
   $("productCategory").value = product.category || "";
   $("productUnit").value = product.unit || "кг";
   $("productPrice").value = product.priceRub;
-  $("productOldPrice").value =
-    product.oldPriceRub == null ? "" : product.oldPriceRub;
+  $("productOldPrice").value = product.oldPriceRub == null
+    ? "" : product.oldPriceRub;
   $("productSort").value = product.sortOrder || 0;
   $("productDescription").value = product.description || "";
   $("productImageUrl").value = product.imageUrl || "";
   $("productAvailable").checked = product.available === true;
-
-  showPreview(safeImageUrl(product.imageUrl));
-  updatePromotionPreview();
-
-  $("editorTitle").scrollIntoView({
-    behavior: "smooth",
-    block: "start"
-  });
+  preview(safeUrl(product.imageUrl));
+  promotionPreview();
+  $("editorTitle").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderProducts() {
@@ -1239,785 +766,503 @@ function renderProducts() {
   list.replaceChildren();
 
   if (!products.length) {
-    list.append(element("p", "muted", "Товаров пока нет."));
+    list.append(node("p", "muted", "Товаров пока нет."));
     return;
   }
 
   for (const product of products) {
-    const card = element("article", "card");
-    const imageUrl = safeImageUrl(product.imageUrl);
+    const card = node("article", "card");
+    const url = safeUrl(product.imageUrl);
 
-    if (imageUrl) {
-      const image = element("img", "product-image");
-      image.alt = product.name || "Фотография товара";
+    if (url) {
+      const image = node("img", "product-image");
+      image.alt = product.name || "Товар";
       image.loading = "lazy";
       image.referrerPolicy = "no-referrer";
-
       image.addEventListener("error", () => image.remove());
-      image.src = imageUrl;
+      image.src = url;
       card.append(image);
     }
 
     card.append(
-      element("h3", "", product.name),
-      element(
-        "p",
-        "muted",
+      node("h3", "", product.name || "Товар"),
+      node("p", "muted",
         (product.category || "") + " · " +
-        (product.available ? "В наличии" : "Скрыт")
-      )
+        (product.available ? "В наличии" : "Скрыт"))
     );
 
-    const priceLine = element("p");
+    const line = node("p");
+    line.append(node("span", "price",
+      money(product.priceRub) + " / " + product.unit));
 
-    priceLine.append(element(
-      "span",
-      "price",
-      money(product.priceRub) + " / " + product.unit
-    ));
-
-    const oldPrice = Number(product.oldPriceRub);
-    const price = Number(product.priceRub);
-
-    if (product.oldPriceRub != null && oldPrice > price) {
-      priceLine.append(
-        element("span", "old-price", money(oldPrice))
+    if (product.oldPriceRub != null &&
+        Number(product.oldPriceRub) > Number(product.priceRub)) {
+      line.append(node("span", "old", money(product.oldPriceRub)));
+      const percent = Math.floor(
+        (Number(product.oldPriceRub) - Number(product.priceRub)) *
+        100 / Number(product.oldPriceRub)
       );
-
-      const discount = Math.floor(
-        ((oldPrice - price) * 100) / oldPrice
-      );
-
-      card.append(element(
-        "span",
-        "badge",
-        discount >= 1 ? "−" + discount + "%" : "Акция"
-      ));
+      card.append(node("span", "badge",
+        percent ? "−" + percent + "%" : "Акция"));
     }
 
-    card.append(priceLine);
-
+    card.append(line);
     if (product.description) {
-      card.append(
-        element("p", "note muted", product.description)
-      );
+      card.append(node("p", "note muted", product.description));
     }
 
-    card.append(
-      makeButton("Редактировать", () => editProduct(product))
-    );
-
+    const edit = button("Редактировать", () => editProduct(product));
+    edit.disabled = productBusy || uploading;
+    card.append(edit);
     list.append(card);
   }
 }
 
 async function loadProducts() {
-  const requestVersion = ++productsRequestVersion;
-  const version = sessionVersion;
-
+  const version = session;
+  const request = ++productRequest;
   message("productsMessage", "Загрузка товаров…");
 
   try {
     const data = await api("/api/admin/products");
-
-    if (
-      version !== sessionVersion ||
-      requestVersion !== productsRequestVersion
-    ) return;
-
+    if (version !== session || request !== productRequest) return;
     if (!Array.isArray(data.products)) {
-      throw new Error("Сервер не вернул список товаров.");
+      throw new Error("Нет списка товаров в ответе.");
     }
-
     products = data.products;
     renderProducts();
-
-    message(
-      "productsMessage",
-      "Товаров: " + products.length,
-      "success"
-    );
+    message("productsMessage", "Товаров: " + products.length, "success");
   } catch (error) {
-    if (
-      isStale(error) ||
-      version !== sessionVersion ||
-      requestVersion !== productsRequestVersion
-    ) return;
-
+    if (error.stale || version !== session || request !== productRequest) return;
     message("productsMessage", error.message, "error");
   }
 }
 
-$("refreshProductsButton").addEventListener(
-  "click",
-  loadProducts
-);
+function validFile(file) {
+  return file &&
+    ["image/jpeg", "image/png", "image/webp"].includes(file.type) &&
+    file.size > 0 && file.size <= 5 * 1024 * 1024;
+}
 
-$("newProductButton").addEventListener("click", () => {
-  if (!saving && !uploading) resetEditor();
-});
-
-$("productPrice").addEventListener(
-  "input",
-  updatePromotionPreview
-);
-
-$("productOldPrice").addEventListener(
-  "input",
-  updatePromotionPreview
-);
-
-$("productImageUrl").addEventListener("input", () => {
-  releaseLocalPreview();
-  showPreview(safeImageUrl($("productImageUrl").value));
-});
-
-$("imageFile").addEventListener("change", () => {
-  releaseLocalPreview();
-  message("imageMessage", "");
-
-  const file = $("imageFile").files[0];
-
-  if (!file) {
-    showPreview(safeImageUrl($("productImageUrl").value));
-    return;
-  }
-
-  if (
-    !["image/jpeg", "image/png", "image/webp"]
-      .includes(file.type) ||
-    file.size <= 0 ||
-    file.size > 5 * 1024 * 1024
-  ) {
-    $("imageFile").value = "";
-    showPreview(safeImageUrl($("productImageUrl").value));
-
-    message(
-      "imageMessage",
-      "Выберите JPG, PNG или WEBP размером до 5 МБ.",
-      "error"
-    );
-    return;
-  }
-
-  localPreviewUrl = URL.createObjectURL(file);
-  showPreview(localPreviewUrl);
-
-  message(
-    "imageMessage",
-    "Фото выбрано. Нажмите «Загрузить фото», " +
-    "затем «Сохранить товар»."
-  );
-});
-
-function fileAsBase64(file) {
+function fileBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
-    reader.onerror = () =>
-      reject(new Error("Не удалось прочитать фотографию."));
-
-    reader.onabort = () =>
-      reject(new Error("Чтение фотографии прервано."));
-
+    reader.onerror = () => reject(new Error("Не удалось прочитать фото."));
+    reader.onabort = () => reject(new Error("Чтение фото прервано."));
     reader.onload = () => {
-      const result = String(reader.result || "");
-      const comma = result.indexOf(",");
-
-      if (comma < 0) {
-        reject(new Error("Не удалось прочитать фотографию."));
-        return;
-      }
-
-      resolve(result.slice(comma + 1));
+      const value = String(reader.result || "");
+      const comma = value.indexOf(",");
+      if (comma < 0) reject(new Error("Некорректная фотография."));
+      else resolve(value.slice(comma + 1));
     };
-
     reader.readAsDataURL(file);
   });
 }
 
-$("uploadImageButton").addEventListener("click", async () => {
-  if (uploading || saving || !imageUploadConfigured) return;
+$("productPrice").addEventListener("input", promotionPreview);
+$("productOldPrice").addEventListener("input", promotionPreview);
+$("productImageUrl").addEventListener("input", () => {
+  releasePreview();
+  preview(safeUrl($("productImageUrl").value));
+});
 
+$("imageFile").addEventListener("change", () => {
+  releasePreview();
   const file = $("imageFile").files[0];
+  message("imageMessage");
 
-  if (
-    !file ||
-    !["image/jpeg", "image/png", "image/webp"]
-      .includes(file.type) ||
-    file.size <= 0 ||
-    file.size > 5 * 1024 * 1024
-  ) {
-    message(
-      "imageMessage",
-      "Сначала выберите JPG, PNG или WEBP до 5 МБ.",
-      "error"
-    );
+  if (!file) {
+    preview(safeUrl($("productImageUrl").value));
     return;
   }
 
-  const version = sessionVersion;
-  const editor = editorVersion;
+  if (!validFile(file)) {
+    $("imageFile").value = "";
+    preview(safeUrl($("productImageUrl").value));
+    message("imageMessage", "Выберите JPG, PNG или WEBP до 5 МБ.", "error");
+    return;
+  }
 
+  previewUrl = URL.createObjectURL(file);
+  preview(previewUrl);
+  message("imageMessage", "Нажмите «Загрузить фото», затем сохраните товар.");
+});
+
+$("uploadImageButton").addEventListener("click", async () => {
+  if (productBusy || uploading || !imagesEnabled) return;
+  const file = $("imageFile").files[0];
+
+  if (!validFile(file)) {
+    message("imageMessage", "Сначала выберите JPG, PNG или WEBP до 5 МБ.", "error");
+    return;
+  }
+
+  const version = session;
+  const currentEditor = editor;
   uploading = true;
-  syncEditorButtons();
+  syncProducts();
+  renderProducts();
   message("imageMessage", "Загрузка фотографии…");
 
   try {
-    const base64 = await fileAsBase64(file);
-
-    if (
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) return;
+    const base64 = await fileBase64(file);
+    if (version !== session || currentEditor !== editor) return;
 
     const data = await api("/api/admin/images", {
       method: "POST",
       body: { mimeType: file.type, base64 }
     });
 
-    if (
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) return;
+    if (version !== session || currentEditor !== editor) return;
+    const url = safeUrl(data.imageUrl);
+    if (!url) throw new Error("Нет корректной ссылки на фото.");
 
-    const imageUrl = safeImageUrl(data.imageUrl);
-
-    if (!imageUrl) {
-      throw new Error("Сервер не вернул ссылку на фото.");
-    }
-
-    $("productImageUrl").value = imageUrl;
+    $("productImageUrl").value = url;
     $("imageFile").value = "";
-
-    releaseLocalPreview();
-    showPreview(imageUrl);
-
-    message(
-      "imageMessage",
-      "Фото загружено. Теперь сохраните товар.",
-      "success"
-    );
+    releasePreview();
+    preview(url);
+    message("imageMessage", "Фото загружено. Сохраните товар.", "success");
   } catch (error) {
-    if (
-      isStale(error) ||
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) return;
-
+    if (error.stale || version !== session || currentEditor !== editor) return;
     message("imageMessage", error.message, "error");
   } finally {
-    if (
-      version === sessionVersion &&
-      editor === editorVersion
-    ) {
+    if (version === session && currentEditor === editor) {
       uploading = false;
-      syncEditorButtons();
+      syncProducts();
+      renderProducts();
     }
   }
 });
 
 $("removeImageButton").addEventListener("click", () => {
-  if (uploading || saving) return;
-
-  releaseLocalPreview();
+  if (productBusy || uploading) return;
+  releasePreview();
   $("productImageUrl").value = "";
   $("imageFile").value = "";
-  showPreview("");
-
-  message(
-    "imageMessage",
-    "Фото убрано из формы. Сохраните товар. " +
-    "Сам файл в Cloudinary не удаляется."
-  );
+  preview("");
+  message("imageMessage",
+    "Фото убрано из формы. Сохраните товар. Файл в Cloudinary не удаляется.");
 });
 
-$("productForm").addEventListener("submit", async (event) => {
+$("productForm").addEventListener("submit", async event => {
   event.preventDefault();
+  if (productBusy || uploading) return;
 
-  if (saving || uploading) return;
+  if (productReview) {
+    message("productMessage",
+      "Сначала обновите ассортимент. Если товар появился — " +
+      "откройте его через «Редактировать». Если нет — нажмите «Новый товар».",
+      "error");
+    return;
+  }
 
   const id = $("productId").value.trim();
-  const price = Number($("productPrice").value);
-  const oldText = $("productOldPrice").value.trim();
-  const oldPrice = oldText ? Number(oldText) : null;
-  const imageUrl = $("productImageUrl").value.trim();
-  const sortOrder = Number($("productSort").value);
+  const current = Number($("productPrice").value);
+  const oldRaw = $("productOldPrice").value.trim();
+  const old = oldRaw ? Number(oldRaw) : null;
+  const sort = Number($("productSort").value);
+  const image = $("productImageUrl").value.trim();
+  const name = $("productName").value.trim();
 
-  if (
-    !Number.isInteger(price) ||
-    price < 1 ||
-    price > 1000000
-  ) {
-    message(
-      "productMessage",
-      "Укажите целую текущую цену от 1 до 1000000 ₽.",
-      "error"
-    );
+  if (name.length < 2 || name.length > 120 ||
+      !Number.isInteger(current) || current < 1 || current > 1000000 ||
+      (old !== null &&
+        (!Number.isInteger(old) || old <= current || old > 1000000)) ||
+      !Number.isInteger(sort) || sort < -100000 || sort > 100000) {
+    message("productMessage", "Проверьте название, цены и порядок.", "error");
     return;
   }
 
-  if (
-    oldPrice !== null &&
-    (
-      !Number.isInteger(oldPrice) ||
-      oldPrice <= price ||
-      oldPrice > 1000000
-    )
-  ) {
-    message(
-      "productMessage",
-      "Старая цена должна быть целой, выше текущей " +
-      "и не больше 1000000 ₽.",
-      "error"
-    );
-    return;
-  }
-
-  if (
-    !Number.isInteger(sortOrder) ||
-    sortOrder < -100000 ||
-    sortOrder > 100000
-  ) {
-    message(
-      "productMessage",
-      "Некорректный порядок сортировки.",
-      "error"
-    );
-    return;
-  }
-
-  if (imageUrl && !safeImageUrl(imageUrl)) {
-    message(
-      "productMessage",
-      "Нужна обычная HTTPS-ссылка на фото.",
-      "error"
-    );
+  if (image && !safeUrl(image)) {
+    message("productMessage", "Для фотографии нужна HTTPS-ссылка.", "error");
     return;
   }
 
   if ($("imageFile").files.length) {
-    message(
-      "productMessage",
-      "Сначала загрузите выбранное фото " +
-      "или отмените выбор файла.",
-      "error"
-    );
+    message("productMessage",
+      "Сначала загрузите выбранное фото или отмените выбор файла.", "error");
     return;
   }
 
   const body = {
-    name: $("productName").value.trim(),
+    name,
     category: $("productCategory").value.trim(),
     unit: $("productUnit").value,
-    priceRub: price,
-    oldPriceRub: oldPrice,
-    sortOrder,
+    priceRub: current,
+    oldPriceRub: old,
+    sortOrder: sort,
     description: $("productDescription").value.trim(),
-    imageUrl,
+    imageUrl: image,
     available: $("productAvailable").checked
   };
 
-  const route = id
-    ? "/api/admin/products/" + encodeURIComponent(id)
-    : "/api/admin/products";
-
-  const version = sessionVersion;
-  const editor = editorVersion;
-
-  saving = true;
-  syncEditorButtons();
+  const version = session;
+  const currentEditor = editor;
+  productBusy = true;
+  syncProducts();
+  renderProducts();
   message("productMessage", "Сохранение…");
 
   try {
-    const data = await api(route, {
-      method: id ? "PUT" : "POST",
-      body
-    });
+    const data = await api(
+      id ? "/api/admin/products/" + encodeURIComponent(id)
+         : "/api/admin/products",
+      { method: id ? "PUT" : "POST", body }
+    );
 
-    if (
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) return;
-
+    if (version !== session || currentEditor !== editor) return;
     if (!data.product || !data.product.id) {
-      throw new Error(
-        "Ответ о сохранении неполный. Обновите ассортимент."
-      );
+      throw new Error("Неполный ответ. Проверьте ассортимент.");
     }
 
     $("productId").value = data.product.id;
     $("editorTitle").textContent = "Редактирование товара";
-
-    message(
-      "productMessage",
-      "Товар сохранён. В приложении обновите ассортимент.",
-      "success"
-    );
-
+    message("productMessage", "Товар сохранён. Обновите каталог в приложении.",
+      "success");
     await loadProducts();
-  } catch (error) {
-    if (
-      isStale(error) ||
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) return;
 
-    message("productMessage", error.message, "error");
+  } catch (error) {
+    if (error.stale || version !== session || currentEditor !== editor) return;
+    productReview = !rejected(error);
+    message("productMessage", error.message +
+      (productReview ? "\nСначала обновите и проверьте ассортимент." : ""), "error");
   } finally {
-    if (
-      version === sessionVersion &&
-      editor === editorVersion
-    ) {
-      saving = false;
-      syncEditorButtons();
+    if (version === session && currentEditor === editor) {
+      productBusy = false;
+      syncProducts();
+      renderProducts();
     }
   }
 });
 
+$("newProductButton").addEventListener("click", () => {
+  if (productBusy || uploading) return;
+  if (productReview && !confirm(
+    "Предыдущее создание могло сохраниться. Вы обновили и проверили " +
+    "ассортимент и хотите открыть новую форму?"
+  )) return;
+  resetProduct();
+});
+
+$("refreshProductsButton").addEventListener("click", loadProducts);
+
 // -------------------- ЗАКАЗЫ --------------------
 
 function renderOrder(order) {
-  const card = element("article", "card");
+  const card = node("article", "card");
   const number = Number(order.orderNumber);
 
   card.append(
-    element(
-      "h3",
-      "",
-      Number.isSafeInteger(number) && number > 0
-        ? "Заказ № " + number
-        : "Заказ " + (order.id || "")
-    ),
-    element("p", "muted", dateLabel(order.createdAt)),
-    element("p", "", "Покупатель: " + (order.name || "—"))
+    node("h3", "", Number.isSafeInteger(number) && number > 0
+      ? "Заказ № " + number : "Заказ " + (order.id || "")),
+    node("p", "muted", dateLabel(order.createdAt)),
+    node("p", "", "Покупатель: " + (order.name || "—"))
   );
 
-  const phoneLine = element("p");
-  phoneLine.append(document.createTextNode("Телефон: "));
-
+  const phoneLine = node("p", "", "Телефон: ");
   const phone = String(order.phone || "");
   const digits = phone.replace(/\D/g, "");
 
   if (/^[78]\d{10}$/.test(digits)) {
-    const link = element("a", "", phone);
+    const link = node("a", "", phone);
     link.href = "tel:+" + digits;
     phoneLine.append(link);
   } else {
     phoneLine.append(document.createTextNode(phone || "—"));
   }
-
   card.append(phoneLine);
 
   if (order.fulfillment === "pickup") {
-    card.append(element(
-      "p",
-      "note",
-      "Самовывоз: г. Макеевка, ул. Плеханова, 1в, " +
-      "магазин «Лавка Вкуса»"
-    ));
+    card.append(node("p", "note",
+      "Самовывоз: г. Макеевка, ул. Плеханова, 1в, магазин «Лавка Вкуса»"));
   } else {
     card.append(
-      element(
-        "p",
-        "",
-        "Город: " + (order.deliveryCity || "не выбран")
-      ),
-      element(
-        "p",
-        "note",
-        "Доставка: " + (order.address || "—")
-      )
+      node("p", "", "Город: " + (order.deliveryCity || "не выбран")),
+      node("p", "note", "Адрес: " + (order.address || "—"))
     );
   }
 
-  const receiving = slotDescription(order.receivingSlot);
+  const time = slotLabel(order.receivingSlot);
+  card.append(node("p", "note slot-note", time
+    ? "Дата и время получения:\n" + time
+    : "Дата и время не выбраны. Согласуйте их с покупателем."));
 
-  card.append(element(
-    "p",
-    "note slot-note",
-    receiving
-      ? "Дата и время получения:\n" + receiving
-      : "Дата и время не выбраны в приложении. " +
-        "Согласуйте их с покупателем."
-  ));
-
-  const list = element("ul", "order-lines");
-
-  for (const item of
-    Array.isArray(order.items) ? order.items : []) {
-    list.append(element(
-      "li",
-      "",
+  const list = node("ul");
+  for (const item of Array.isArray(order.items) ? order.items : []) {
+    list.append(node("li", "",
       (item.name || "Товар") + ": " +
       quantity(item.quantity) + " " + (item.unit || "") +
-      " × " + money(item.priceRub) +
-      " = " + money(item.totalRub)
-    ));
+      " × " + money(item.priceRub) + " = " + money(item.totalRub)));
   }
 
-  card.append(
-    list,
-    element("p", "price", "Товары: " + money(order.totalRub))
-  );
+  card.append(list, node("p", "price", "Товары: " + money(order.totalRub)));
 
-  const savedInfo = order.deliveryInfo;
-
-  const deliveryNote =
-    savedInfo && typeof savedInfo.message === "string"
-      ? savedInfo.message
-      : order.fulfillment === "pickup"
-        ? "Самовывоз."
-        : "Условия доставки уточняйте по договорённости " +
-          "с покупателем. Они не пересчитываются по текущим правилам.";
+  const terms = order.deliveryInfo &&
+    typeof order.deliveryInfo.message === "string"
+      ? order.deliveryInfo.message
+      : "Условия получения уточняйте по договорённости с покупателем.";
 
   card.append(
-    element("p", "note muted", deliveryNote),
-    element("p", "muted", "Оплата при получении.")
+    node("p", "note muted", terms),
+    node("p", "muted", "Оплата при получении.")
   );
-
   if (order.comment) {
-    card.append(element(
-      "p",
-      "note",
-      "Комментарий: " + order.comment
-    ));
+    card.append(node("p", "note", "Комментарий: " + order.comment));
   }
 
-  card.append(element(
-    "p",
-    "muted",
-    "Telegram: " +
-    (telegramStatuses[order.telegramStatus] || "Неизвестно")
-  ));
+  card.append(node("p", "muted",
+    "Telegram: " + (telegramStatuses[order.telegramStatus] || "Неизвестно")));
 
-  const label = element("label", "", "Статус заказа");
-  const select = element("select", "order-status");
-
+  const label = node("label", "", "Статус заказа");
+  const select = node("select", "order-status");
   for (const [value, title] of Object.entries(statuses)) {
-    const option = element("option", "", title);
+    const option = node("option", "", title);
     option.value = value;
     select.append(option);
   }
-
-  select.value = order.status || "new";
+  select.value = statuses[order.status] ? order.status : "new";
   label.append(select);
 
-  const save = makeButton("Сохранить статус", async () => {
-    const version = sessionVersion;
-    const selectedStatus = select.value;
+  const result = node("div", "message");
+  result.setAttribute("role", "status");
 
+  const save = button("Сохранить статус", async () => {
+    const version = session;
     save.disabled = true;
     select.disabled = true;
-    statusMessage.className = "message";
-    statusMessage.textContent = "Сохранение…";
+    result.className = "message";
+    result.textContent = "Сохранение…";
 
     try {
       const data = await api(
-        "/api/admin/orders/" +
-        encodeURIComponent(order.id) + "/status",
-        {
-          method: "PATCH",
-          body: { status: selectedStatus }
-        }
+        "/api/admin/orders/" + encodeURIComponent(order.id) + "/status",
+        { method: "PATCH", body: { status: select.value } }
       );
-
-      if (version !== sessionVersion) return;
-
+      if (version !== session) return;
       if (!data.order || !statuses[data.order.status]) {
-        throw new Error(
-          "Ответ о статусе неполный. Обновите заказы."
-        );
+        throw new Error("Неполный ответ. Обновите список заказов.");
       }
 
       order.status = data.order.status;
       select.value = order.status;
-
-      statusMessage.className = "message success";
-      statusMessage.textContent = "Статус сохранён.";
+      result.className = "message success";
+      result.textContent = "Статус сохранён.";
     } catch (error) {
-      if (isStale(error) || version !== sessionVersion) return;
-
-      statusMessage.className = "message error";
-      statusMessage.textContent = error.message;
+      if (error.stale || version !== session) return;
+      result.className = "message error";
+      result.textContent = error.message + "\nПроверьте список заказов.";
     } finally {
-      if (version === sessionVersion) {
+      if (version === session) {
         save.disabled = false;
         select.disabled = false;
       }
     }
   });
 
-  const statusMessage = element("div", "message");
-  statusMessage.setAttribute("role", "status");
-
-  card.append(label, save, statusMessage);
+  card.append(label, save, result);
   return card;
 }
 
-async function loadOrders(page) {
+async function loadOrders(destination) {
   if (ordersBusy) return;
-
-  const version = sessionVersion;
+  const version = session;
   ordersBusy = true;
-
   $("refreshOrdersButton").disabled = true;
   $("previousPageButton").disabled = true;
   $("nextPageButton").disabled = true;
-
   message("ordersMessage", "Загрузка заказов…");
-
   let loaded = false;
-  let hasNext = false;
 
   try {
-    const data = await api(
-      "/api/admin/orders?page=" + encodeURIComponent(page)
-    );
-
-    if (version !== sessionVersion) return;
-
+    const data = await api("/api/admin/orders?page=" + destination);
+    if (version !== session) return;
     if (!Array.isArray(data.orders)) {
-      throw new Error("Сервер не вернул список заказов.");
+      throw new Error("Нет списка заказов.");
     }
 
-    ordersPage = page;
-
+    page = destination;
     const list = $("ordersList");
     list.replaceChildren();
-
-    for (const order of data.orders) {
-      list.append(renderOrder(order));
-    }
+    for (const order of data.orders) list.append(renderOrder(order));
 
     if (!data.orders.length) {
-      list.append(element(
-        "p",
-        "muted",
-        "На этой странице заказов нет."
-      ));
+      list.append(node("p", "muted", "На этой странице заказов нет."));
     }
 
-    $("pageLabel").textContent = "Страница " + ordersPage;
-
-    const pageSize =
-      Number.isInteger(data.pageSize) && data.pageSize > 0
-        ? data.pageSize : 50;
-
-    hasNext = data.orders.length >= pageSize;
+    const size = Number.isInteger(data.pageSize) && data.pageSize > 0
+      ? data.pageSize : 50;
+    hasNext = data.orders.length >= size;
     loaded = true;
-
-    message(
-      "ordersMessage",
-      "Загружено заказов: " + data.orders.length,
-      "success"
-    );
+    $("pageLabel").textContent = "Страница " + page;
+    message("ordersMessage", "Заказов: " + data.orders.length, "success");
   } catch (error) {
-    if (isStale(error) || version !== sessionVersion) return;
-
+    if (error.stale || version !== session) return;
     message("ordersMessage", error.message, "error");
   } finally {
-    if (version === sessionVersion) {
+    if (version === session) {
       ordersBusy = false;
       $("refreshOrdersButton").disabled = false;
-      $("previousPageButton").disabled = ordersPage <= 1;
+      $("previousPageButton").disabled = page <= 1;
       $("nextPageButton").disabled = !loaded || !hasNext;
     }
   }
 }
 
-$("refreshOrdersButton").addEventListener(
-  "click",
-  () => loadOrders(ordersPage)
-);
-
+$("refreshOrdersButton").addEventListener("click", () => loadOrders(page));
 $("previousPageButton").addEventListener("click", () => {
-  if (ordersPage > 1) loadOrders(ordersPage - 1);
+  if (page > 1) loadOrders(page - 1);
 });
-
-$("nextPageButton").addEventListener(
-  "click",
-  () => loadOrders(ordersPage + 1)
-);
+$("nextPageButton").addEventListener("click", () => {
+  if (hasNext) loadOrders(page + 1);
+});
 
 // -------------------- РАСПИСАНИЕ --------------------
 
-function slotBusy() {
-  return slotSaving || slotChanging || slotsLoading;
+function validSlot(slot) {
+  return slot && SLOT_ID.test(slot.id || "") &&
+    validDate(slot.date) && validTime(slot.startTime) &&
+    validTime(slot.endTime) && slot.startTime < slot.endTime &&
+    ["delivery", "pickup"].includes(slot.fulfillment) &&
+    typeof slot.enabled === "boolean";
 }
 
-function syncSlotControls() {
+function dateLimits() {
+  $("slotDate").min = today();
+  $("slotDate").max = addDays(today(), 60);
+}
+
+function syncSlots() {
   $("slotFields").disabled =
-    !schedulingEnabled || slotBusy();
-
+    !scheduleEnabled || slotBusy || slotsLoading;
   $("saveSlotButton").disabled =
-    !schedulingEnabled || slotBusy() || slotNeedsReview;
-
+    !scheduleEnabled || slotBusy || slotsLoading || slotReview;
   $("refreshSlotsButton").disabled =
-    !schedulingEnabled || slotBusy();
+    !scheduleEnabled || slotBusy || slotsLoading;
 }
 
-function setSlotDateLimits() {
-  const today = storeToday();
-
-  $("slotDate").min = today;
-  $("slotDate").max = addDays(today, 60);
-}
-
-function resetSlotEditor() {
+function resetSlot() {
   $("slotForm").reset();
   $("slotId").value = "";
-  $("slotDate").value = addDays(storeToday(), 1);
+  $("slotDate").value = addDays(today(), 1);
   $("slotStart").value = "";
   $("slotEnd").value = "";
   $("slotEnabled").checked = true;
   $("slotEditorTitle").textContent = "Новый интервал";
-
-  slotNeedsReview = false;
-
-  setSlotDateLimits();
-  message("slotMessage", "");
-  syncSlotControls();
-}
-
-function validSlotRecord(slot) {
-  return (
-    slot &&
-    typeof slot === "object" &&
-    SLOT_ID_PATTERN.test(slot.id || "") &&
-    validDate(slot.date) &&
-    validTime(slot.startTime) &&
-    validTime(slot.endTime) &&
-    slot.startTime < slot.endTime &&
-    ["delivery", "pickup"].includes(slot.fulfillment) &&
-    typeof slot.enabled === "boolean"
-  );
+  slotReview = false;
+  dateLimits();
+  message("slotMessage");
+  syncSlots();
 }
 
 function editSlot(slot) {
-  if (slotBusy()) return;
-
-  if (slot.date < storeToday()) {
-    message(
-      "slotsMessage",
-      "Прошедшие даты не редактируются. " +
-      "При необходимости закройте интервал кнопкой в карточке.",
-      "error"
-    );
+  if (slotBusy || slotsLoading) return;
+  if (slot.date < today()) {
+    message("slotsMessage",
+      "Прошедшую дату нельзя редактировать. Интервал можно закрыть.", "error");
     return;
   }
 
-  if (
-    slotNeedsReview &&
-    !window.confirm(
-      "Предыдущий результат был не подтверждён. " +
-      "Вы проверили обновлённый список и хотите " +
-      "редактировать именно этот интервал?"
-    )
-  ) return;
-
-  resetSlotEditor();
-
+  resetSlot();
   $("slotEditorTitle").textContent = "Редактирование интервала";
   $("slotId").value = slot.id;
   $("slotDate").value = slot.date;
@@ -2026,101 +1271,56 @@ function editSlot(slot) {
   $("slotFulfillment").value = slot.fulfillment;
   $("slotEnabled").checked = slot.enabled;
 
-  message(
-    "slotMessage",
-    "Изменения повлияют только на новые заказы. " +
-    "Дата и время в уже оформленных заказах не изменятся."
-  );
-
-  $("slotEditorTitle").scrollIntoView({
-    behavior: "smooth",
-    block: "start"
-  });
+  message("slotMessage",
+    "Редактируется сохранённый интервал. Старые заказы не изменятся.");
+  $("slotEditorTitle").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderSlots() {
   const list = $("slotsList");
   list.replaceChildren();
-
   const mode = $("slotsModeFilter").value;
   const state = $("slotsStateFilter").value;
 
-  const filtered = slots.filter((slot) => {
+  const filtered = slots.filter(slot => {
     if (mode && slot.fulfillment !== mode) return false;
-
-    const past = slotStarted(slot);
-
+    const past = started(slot);
     if (state === "open") return slot.enabled && !past;
     if (state === "closed") return !slot.enabled;
     if (state === "past") return past;
-
     return true;
   });
 
   if (!filtered.length) {
-    list.append(element(
-      "p",
-      "muted",
-      slots.length
-        ? "По выбранным фильтрам интервалов нет."
-        : "Интервалов пока нет. Добавьте первый слева."
-    ));
+    list.append(node("p", "muted", slots.length
+      ? "По выбранным фильтрам интервалов нет."
+      : "Сохранённых интервалов пока нет. Заполните форму и сохраните."));
     return;
   }
 
   for (const slot of filtered) {
-    const card = element("article", "card");
-    const past = slotStarted(slot);
-
+    const past = started(slot);
+    const card = node("article", "card");
     card.append(
-      element(
-        "span",
-        "badge" + (!slot.enabled || past ? " closed" : ""),
-        past
-          ? "Начался / прошёл"
-          : slot.enabled ? "Открыт" : "Закрыт"
-      ),
-      element("h3", "", slotDescription(slot)),
-      element(
-        "p",
-        "",
-        "Получение: " + fulfillmentTitle(slot.fulfillment)
-      )
+      node("span", "badge" + (!slot.enabled || past ? " closed" : ""),
+        past ? "Начался / прошёл" : slot.enabled ? "Открыт" : "Закрыт"),
+      node("h3", "", slotLabel(slot)),
+      node("p", "", "Получение: " + modeLabel(slot.fulfillment))
     );
 
     if (past && slot.enabled) {
-      card.append(element(
-        "p",
-        "muted",
-        "Время уже наступило: покупателям интервал " +
-        "не показывается, даже если отметка «Открыт» сохранена."
-      ));
+      card.append(node("p", "muted",
+        "Начало уже наступило. Покупателям этот интервал не показывается."));
     }
 
-    const row = element("div", "row");
+    const row = node("div", "row");
+    const edit = button("Редактировать", () => editSlot(slot));
+    edit.disabled = slotBusy || slotsLoading || slot.date < today();
 
-    const edit = makeButton(
-      "Редактировать",
-      () => editSlot(slot)
-    );
-
-    edit.disabled =
-      slotBusy() || slot.date < storeToday();
-
-    const toggle = makeButton(
-      slot.enabled ? "Закрыть" : "Открыть",
-      () => toggleSlot(slot)
-    );
-
-    toggle.disabled =
-      slotBusy() ||
-      (
-        !slot.enabled &&
-        (
-          past ||
-          slot.date > addDays(storeToday(), 60)
-        )
-      );
+    const toggle = button(
+      slot.enabled ? "Закрыть" : "Открыть", () => toggleSlot(slot));
+    toggle.disabled = slotBusy || slotsLoading ||
+      (!slot.enabled && (past || slot.date > addDays(today(), 60)));
 
     row.append(edit, toggle);
     card.append(row);
@@ -2129,185 +1329,97 @@ function renderSlots() {
 }
 
 async function loadSlots() {
-  if (
-    !schedulingEnabled ||
-    slotSaving ||
-    slotChanging
-  ) return false;
-
-  const version = sessionVersion;
-  const requestVersion = ++slotsRequestVersion;
-
+  if (!scheduleEnabled || slotBusy || slotsLoading) return;
+  const version = session;
+  const request = ++slotRequest;
   slotsLoading = true;
-  syncSlotControls();
+  syncSlots();
   renderSlots();
-
   message("slotsMessage", "Загрузка расписания…");
 
   try {
     const data = await api("/api/admin/receiving-slots");
-
-    if (
-      version !== sessionVersion ||
-      requestVersion !== slotsRequestVersion
-    ) return false;
-
-    if (
-      !Array.isArray(data.slots) ||
-      !data.slots.every(validSlotRecord)
-    ) {
-      throw new Error(
-        "Сервер вернул некорректное расписание."
-      );
+    if (version !== session || request !== slotRequest) return;
+    if (!Array.isArray(data.slots) || !data.slots.every(validSlot)) {
+      throw new Error("Сервер вернул некорректное расписание.");
     }
 
     slots = data.slots;
-
-    message(
-      "slotsMessage",
-      "Интервалов: " + slots.length +
-      ". Время — московское, UTC+3." +
-      (
-        slotNeedsReview
-          ? "\nПроверьте список перед повторением " +
-            "предыдущего действия."
-          : ""
-      ),
-      "success"
-    );
-
-    return true;
+    message("slotsMessage",
+      "Сохранённых интервалов: " + slots.length + ". Время — UTC+3." +
+      (slotReview ? "\nПроверьте список перед повторением действия." : ""),
+      "success");
   } catch (error) {
-    if (
-      isStale(error) ||
-      version !== sessionVersion ||
-      requestVersion !== slotsRequestVersion
-    ) return false;
-
+    if (error.stale || version !== session || request !== slotRequest) return;
     message("slotsMessage", error.message, "error");
-    return false;
   } finally {
-    if (
-      version === sessionVersion &&
-      requestVersion === slotsRequestVersion
-    ) {
+    if (version === session && request === slotRequest) {
       slotsLoading = false;
-      setSlotDateLimits();
-      syncSlotControls();
+      dateLimits();
+      syncSlots();
       renderSlots();
     }
   }
 }
 
 async function toggleSlot(slot) {
-  if (slotBusy() || !schedulingEnabled) return;
-
+  if (slotBusy || slotsLoading || !scheduleEnabled) return;
   const enabled = !slot.enabled;
 
-  if (
-    enabled &&
-    (
-      slotStarted(slot) ||
-      slot.date > addDays(storeToday(), 60)
-    )
-  ) {
-    message(
-      "slotsMessage",
-      "Этот интервал нельзя открыть. " +
-      "Проверьте дату и время.",
-      "error"
-    );
+  if (enabled && (started(slot) || slot.date > addDays(today(), 60))) {
+    message("slotsMessage", "Этот интервал уже нельзя открыть.", "error");
     return;
   }
 
-  if (
-    !window.confirm(
-      (enabled ? "Открыть" : "Закрыть") +
-      " интервал?\n\n" +
-      slotDescription(slot) + "\n" +
-      fulfillmentTitle(slot.fulfillment) +
-      "\n\nУже оформленные заказы не изменятся."
-    )
-  ) return;
+  if (!confirm(
+    (enabled ? "Открыть" : "Закрыть") + " интервал?\n\n" +
+    slotLabel(slot) + "\n" + modeLabel(slot.fulfillment) +
+    "\n\nСтарые заказы не изменятся."
+  )) return;
 
-  const version = sessionVersion;
-  slotChanging = true;
-  syncSlotControls();
+  const version = session;
+  slotBusy = true;
+  syncSlots();
   renderSlots();
-
-  message("slotsMessage", "Сохранение состояния интервала…");
-
-  let success = false;
+  message("slotsMessage", "Сохранение…");
 
   try {
     const data = await api(
-      "/api/admin/receiving-slots/" +
-      encodeURIComponent(slot.id),
-      {
-        method: "PATCH",
-        body: { enabled }
-      }
+      "/api/admin/receiving-slots/" + encodeURIComponent(slot.id),
+      { method: "PATCH", body: { enabled } }
     );
-
-    if (version !== sessionVersion) return;
-
-    if (!validSlotRecord(data.slot)) {
-      throw new Error(
-        "Ответ неполный. Обновите расписание."
-      );
+    if (version !== session) return;
+    if (!validSlot(data.slot) || data.slot.id !== slot.id) {
+      throw new Error("Неполный ответ. Обновите расписание.");
     }
 
-    slots = slots.map((item) =>
-      item.id === data.slot.id ? data.slot : item
-    );
+    slots = slots.map(item => item.id === slot.id ? data.slot : item);
+    if ($("slotId").value === slot.id) {
+      $("slotEnabled").checked = data.slot.enabled;
+    }
 
-    success = true;
-
-    message(
-      "slotsMessage",
-      enabled
-        ? "Интервал открыт для новых заказов."
-        : "Интервал закрыт. Ранее оформленные заказы сохранены.",
-      "success"
-    );
+    message("slotsMessage",
+      data.slot.enabled ? "Интервал открыт." : "Интервал закрыт.",
+      "success");
   } catch (error) {
-    if (isStale(error) || version !== sessionVersion) return;
-
-    message(
-      "slotsMessage",
-      error.message +
-      "\nОбновите расписание перед следующим действием.",
-      "error"
-    );
+    if (error.stale || version !== session) return;
+    message("slotsMessage", error.message +
+      "\nОбновите расписание перед следующим действием.", "error");
   } finally {
-    if (version === sessionVersion) {
-      slotChanging = false;
-      syncSlotControls();
+    if (version === session) {
+      slotBusy = false;
+      syncSlots();
       renderSlots();
-
-      if (
-        success &&
-        $("slotId").value === slot.id
-      ) {
-        $("slotEnabled").checked = enabled;
-      }
     }
   }
 }
 
-$("slotForm").addEventListener("submit", async (event) => {
+$("slotForm").addEventListener("submit", async event => {
   event.preventDefault();
-
-  if (
-    slotBusy() ||
-    slotNeedsReview ||
-    !schedulingEnabled
-  ) return;
-
-  setSlotDateLimits();
+  if (slotBusy || slotsLoading || slotReview || !scheduleEnabled) return;
+  dateLimits();
 
   const id = $("slotId").value.trim();
-
   const body = {
     date: $("slotDate").value,
     startTime: $("slotStart").value,
@@ -2316,1492 +1428,171 @@ $("slotForm").addEventListener("submit", async (event) => {
     enabled: $("slotEnabled").checked
   };
 
-  const today = storeToday();
-
-  if (
-    !validDate(body.date) ||
-    body.date < today ||
-    body.date > addDays(today, 60)
-  ) {
-    message(
-      "slotMessage",
-      "Выберите дату от сегодня до ближайших 60 дней.",
-      "error"
-    );
+  if (!validDate(body.date) ||
+      body.date < today() || body.date > addDays(today(), 60)) {
+    message("slotMessage", "Выберите сегодня или ближайшие 60 дней.", "error");
     return;
   }
 
-  if (
-    !validTime(body.startTime) ||
-    !validTime(body.endTime) ||
-    body.startTime >= body.endTime
-  ) {
-    message(
-      "slotMessage",
-      "Конец интервала должен быть позже начала " +
-      "в пределах одного дня.",
-      "error"
-    );
+  if (!validTime(body.startTime) || !validTime(body.endTime) ||
+      body.startTime >= body.endTime) {
+    message("slotMessage",
+      "Конец должен быть позже начала в пределах одного дня.", "error");
     return;
   }
 
-  if (
-    body.enabled &&
-    slotStarted(body)
-  ) {
-    message(
-      "slotMessage",
-      "Нельзя открыть уже начавшийся интервал. " +
-      "Измените время или дату.",
-      "error"
-    );
+  if (body.enabled && started(body)) {
+    message("slotMessage",
+      "Начало уже наступило. Выберите будущее время или завтрашнюю дату.",
+      "error");
     return;
   }
 
-  if (id && !SLOT_ID_PATTERN.test(id)) {
-    message(
-      "slotMessage",
-      "Некорректный код интервала. Обновите расписание.",
-      "error"
-    );
+  if (id && !SLOT_ID.test(id)) {
+    message("slotMessage", "Некорректный код интервала.", "error");
     return;
   }
 
-  if (
-    id &&
-    !window.confirm(
-      "Сохранить изменения интервала?\n\n" +
-      "Они повлияют только на новые заказы. " +
-      "Ранее оформленные заказы не переносятся."
-    )
-  ) return;
+  if (id && !confirm(
+    "Сохранить изменения? Ранее оформленные заказы не изменятся."
+  )) return;
 
-  const version = sessionVersion;
-  slotSaving = true;
-  syncSlotControls();
+  const version = session;
+  slotBusy = true;
+  syncSlots();
   renderSlots();
-
   message("slotMessage", "Сохранение интервала…");
-
   let saved = false;
 
   try {
     const data = await api(
-      id
-        ? "/api/admin/receiving-slots/" +
-          encodeURIComponent(id)
-        : "/api/admin/receiving-slots",
-      {
-        method: id ? "PUT" : "POST",
-        body
-      }
+      id ? "/api/admin/receiving-slots/" + encodeURIComponent(id)
+         : "/api/admin/receiving-slots",
+      { method: id ? "PUT" : "POST", body }
     );
 
-    if (version !== sessionVersion) return;
-
-    if (!validSlotRecord(data.slot)) {
-      throw new Error(
-        "Ответ о сохранении неполный. Обновите расписание."
-      );
+    if (version !== session) return;
+    if (!validSlot(data.slot)) {
+      throw new Error("Неполный ответ. Проверьте список интервалов.");
     }
 
     $("slotId").value = data.slot.id;
-    $("slotEditorTitle").textContent =
-      "Редактирование интервала";
-
+    $("slotEditorTitle").textContent = "Редактирование интервала";
     saved = true;
 
-    message(
-      "slotMessage",
-      "Интервал сохранён: " +
-      slotDescription(data.slot) + ". " +
-      (data.slot.enabled ? "Открыт." : "Закрыт."),
-      "success"
-    );
+    message("slotMessage",
+      "Интервал сохранён: " + slotLabel(data.slot) + ". " +
+      modeLabel(data.slot.fulfillment) + ". " +
+      (data.slot.enabled ? "Открыт для новых заказов." : "Закрыт."),
+      "success");
   } catch (error) {
-    if (isStale(error) || version !== sessionVersion) return;
+    if (error.stale || version !== session) return;
+    slotReview = !rejected(error);
 
-    /*
-     * При сетевой ошибке не повторяем создание автоматически:
-     * сервер мог сохранить интервал до обрыва ответа.
-     */
-    const confirmedRejection =
-      Number.isInteger(error.statusCode) &&
-      error.statusCode >= 400 &&
-      error.statusCode < 500;
-
-    slotNeedsReview = !confirmedRejection;
-
-    message(
-      "slotMessage",
-      error.message +
-      (
-        slotNeedsReview
-          ? "\n\nСначала обновите список. Если интервал появился, " +
-            "нажмите у него «Редактировать», а не создавайте копию. " +
-            "Если его нет — после проверки нажмите «Новый интервал»."
-          : ""
-      ),
-      "error"
-    );
+    message("slotMessage", error.message +
+      (slotReview
+        ? "\nСначала обновите список. Если интервал появился, " +
+          "нажмите у него «Редактировать». Не создавайте копию."
+        : ""), "error");
   } finally {
-    if (version === sessionVersion) {
-      slotSaving = false;
-      syncSlotControls();
+    if (version === session) {
+      slotBusy = false;
+      syncSlots();
       renderSlots();
-
-      if (saved) {
-        await loadSlots();
-      }
+      if (saved) await loadSlots();
     }
   }
 });
 
 $("newSlotButton").addEventListener("click", () => {
-  if (slotBusy()) return;
-
-  if (
-    slotNeedsReview &&
-    !window.confirm(
-      "Сначала обновите и проверьте список: " +
-      "предыдущий интервал мог сохраниться.\n\n" +
-      "Вы проверили список и хотите открыть новую форму?"
-    )
-  ) return;
-
-  resetSlotEditor();
+  if (slotBusy || slotsLoading) return;
+  if (slotReview && !confirm(
+    "Предыдущий интервал мог сохраниться. Вы обновили и проверили список " +
+    "и хотите открыть новую форму?"
+  )) return;
+  resetSlot();
 });
 
-$("refreshSlotsButton").addEventListener(
-  "click",
-  loadSlots
-);
-
-$("slotsModeFilter").addEventListener(
-  "change",
-  renderSlots
-);
-
-$("slotsStateFilter").addEventListener(
-  "change",
-  renderSlots
-);
+$("refreshSlotsButton").addEventListener("click", loadSlots);
+$("slotsModeFilter").addEventListener("change", renderSlots);
+$("slotsStateFilter").addEventListener("change", renderSlots);
 
 // -------------------- ВХОД И НАВИГАЦИЯ --------------------
 
-function showTab(tab) {
-  const names = ["products", "orders", "schedule"];
+function showTab(name) {
+  if (!token || !["products", "orders", "schedule"].includes(name)) return;
 
-  if (!names.includes(tab) || !token) return;
-
-  for (const name of names) {
-    const selected = name === tab;
-
-    $(name + "Section").hidden = !selected;
-    $(name + "Tab").setAttribute(
-      "aria-pressed",
-      String(selected)
-    );
-
-    $(name + "Tab").className =
-      selected ? "" : "secondary";
+  for (const current of ["products", "orders", "schedule"]) {
+    const selected = current === name;
+    $(current + "Section").hidden = !selected;
+    $(current + "Tab").className = selected ? "" : "secondary";
+    $(current + "Tab").setAttribute("aria-pressed", String(selected));
   }
 
-  if (tab === "products") {
-    loadProducts();
-  } else if (tab === "orders") {
-    loadOrders(ordersPage);
-  } else if (schedulingEnabled) {
-    loadSlots();
-  }
+  if (name === "products") loadProducts();
+  if (name === "orders") loadOrders(page);
+  if (name === "schedule" && scheduleEnabled) loadSlots();
 }
 
 function logout() {
-  sessionVersion += 1;
-  productsRequestVersion += 1;
-  slotsRequestVersion += 1;
+  session++;
+  productRequest++;
+  slotRequest++;
 
-  for (const controller of activeRequests) {
-    controller.abort();
-  }
-
-  activeRequests.clear();
+  for (const controller of controllers) controller.abort();
+  controllers.clear();
 
   token = "";
   products = [];
   slots = [];
-
-  ordersPage = 1;
+  page = 1;
+  hasNext = false;
   ordersBusy = false;
+  productBusy = false;
   uploading = false;
-  saving = false;
-
+  productReview = false;
+  slotBusy = false;
   slotsLoading = false;
-  slotSaving = false;
-  slotChanging = false;
-  slotNeedsReview = false;
-
-  imageUploadConfigured = false;
-  schedulingEnabled = false;
+  slotReview = false;
+  imagesEnabled = false;
+  scheduleEnabled = false;
 
   $("adminToken").value = "";
   $("loginButton").disabled = false;
-  $("appPanel").hidden = true;
   $("loginPanel").hidden = false;
+  $("appPanel").hidden = true;
 
-  $("productsList").replaceChildren();
-  $("ordersList").replaceChildren();
-  $("slotsList").replaceChildren();
+  for (const id of ["productsList", "ordersList", "slotsList"]) {
+    $(id).replaceChildren();
+  }
+
+  for (const id of [
+    "globalMessage", "productsMessage", "ordersMessage", "slotsMessage"
+  ]) message(id);
 
   $("pageLabel").textContent = "Страница 1";
   $("previousPageButton").disabled = true;
   $("nextPageButton").disabled = true;
   $("refreshOrdersButton").disabled = false;
-
   $("slotsModeFilter").value = "";
   $("slotsStateFilter").value = "";
 
-  for (const id of [
-    "globalMessage",
-    "productsMessage",
-    "ordersMessage",
-    "slotsMessage"
-  ]) {
-    message(id, "");
-  }
-
-  resetEditor();
-  resetSlotEditor();
+  resetProduct();
+  resetSlot();
 }
 
-$("loginForm").addEventListener("submit", async (event) => {
+$("loginForm").addEventListener("submit", async event => {
   event.preventDefault();
+  if ($("loginButton").disabled) return;
 
   const value = $("adminToken").value.trim();
-
   if (value.length < 32) {
-    message(
-      "loginMessage",
-      "Ключ должен содержать не менее 32 символов.",
-      "error"
-    );
+    message("loginMessage", "Ключ должен содержать минимум 32 символа.", "error");
     return;
   }
 
-  sessionVersion += 1;
-  const version = sessionVersion;
-
-  token = value;
-
-  $("adminToken").value = "";
-  $("loginButton").disabled = true;
-
-  message("loginMessage", "Подключение к серверу…");
-
-  try {
-    const config = await api("/api/admin/config");
-
-    if (version !== sessionVersion) return;
-
-    imageUploadConfigured =
-      config.imageUploadConfigured === true;
-
-    schedulingEnabled =
-      config.schedulingEnabled === true;
-
-    $("scheduleUnavailable").hidden = schedulingEnabled;
-
-    $("loginPanel").hidden = true;
-    $("appPanel").hidden = false;
-
-    resetEditor();
-    resetSlotEditor();
-    showTab("products");
-
-    message("loginMessage", "");
-
-    message(
-      "globalMessage",
-      (
-        imageUploadConfigured
-          ? "Загрузка фотографий подключена."
-          : "Для фото доступны прямые HTTPS-ссылки."
-      ) +
-      " Акции доступны. " +
-      (
-        schedulingEnabled
-          ? "Расписание подключено."
-          : "Поддержка расписания сервером не подтверждена."
-      )
-    );
-  } catch (error) {
-    if (isStale(error) || version !== sessionVersion) return;
-
-    token = "";
-    message("loginMessage", error.message, "error");
-  } finally {
-    if (version === sessionVersion) {
-      $("loginButton").disabled = false;
-    }
-  }
-});
-
-$("productsTab").addEventListener(
-  "click",
-  () => showTab("products")
-);
-
-$("ordersTab").addEventListener(
-  "click",
-  () => showTab("orders")
-);
-
-$("scheduleTab").addEventListener(
-  "click",
-  () => showTab("schedule")
-);
-
-$("logoutButton").addEventListener("click", () => {
-  logout();
-  message("loginMessage", "Вы вышли из панели.");
-});
-
-window.addEventListener("pagehide", releaseLocalPreview);
-
-resetEditor();
-resetSlotEditor();
-</script>
-</body>
-</html>
-<!-- КОНЕЦ ФАЙЛА -->
-
-  <meta charset="utf-8">
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1"
-  >
-  <meta name="referrer" content="no-referrer">
-  <title>Лавка Вкуса — управление</title>
-
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #121212;
-      --card: #202020;
-      --field: #161616;
-      --gold: #d4af37;
-      --text: #f4f1e8;
-      --muted: #bbb6a7;
-      --border: #45402e;
-      --red: #ff9898;
-      --green: #a4ddb0;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font: 16px/1.5 system-ui, sans-serif;
-    }
-
-    [hidden] {
-      display: none !important;
-    }
-
-    main {
-      max-width: 1100px;
-      margin: auto;
-      padding: 20px 14px 60px;
-    }
-
-    header {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      margin-bottom: 22px;
-    }
-
-    .logo {
-      display: grid;
-      place-items: center;
-      width: 64px;
-      height: 64px;
-      flex-shrink: 0;
-      border: 1px solid var(--gold);
-      border-radius: 18px;
-      color: var(--gold);
-      font-size: 26px;
-      font-weight: 800;
-    }
-
-    h1 {
-      margin: 0;
-      color: var(--gold);
-      font-size: 25px;
-    }
-
-    h2 {
-      margin-top: 0;
-      font-size: 21px;
-    }
-
-    h3 {
-      margin: 0 0 8px;
-      font-size: 18px;
-      overflow-wrap: anywhere;
-    }
-
-    p {
-      margin: 8px 0;
-    }
-
-    .muted,
-    small {
-      color: var(--muted);
-    }
-
-    .panel,
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 18px;
-      margin-bottom: 16px;
-    }
-
-    label {
-      display: block;
-      margin-bottom: 14px;
-    }
-
-    input,
-    select,
-    textarea,
-    button {
-      font: inherit;
-    }
-
-    input:not([type="checkbox"]),
-    select,
-    textarea {
-      display: block;
-      width: 100%;
-      margin-top: 6px;
-      padding: 12px;
-      color: var(--text);
-      background: var(--field);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-    }
-
-    input[readonly] {
-      color: var(--muted);
-    }
-
-    input:focus,
-    select:focus,
-    textarea:focus,
-    button:focus-visible {
-      outline: 2px solid var(--gold);
-      outline-offset: 2px;
-    }
-
-    textarea {
-      min-height: 100px;
-      resize: vertical;
-    }
-
-    button {
-      padding: 11px 16px;
-      border: 1px solid var(--gold);
-      border-radius: 10px;
-      background: var(--gold);
-      color: #15130c;
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    button.secondary {
-      background: transparent;
-      color: var(--gold);
-    }
-
-    button:disabled {
-      cursor: wait;
-      opacity: .5;
-    }
-
-    .row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0 16px;
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 18px;
-      align-items: start;
-    }
-
-    .check {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .check input {
-      width: 20px;
-      height: 20px;
-      accent-color: var(--gold);
-    }
-
-    .message {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      color: var(--muted);
-      margin: 12px 0;
-    }
-
-    .message.error {
-      color: var(--red);
-    }
-
-    .message.success {
-      color: var(--green);
-    }
-
-    .price {
-      color: var(--gold);
-      font-weight: 800;
-      font-size: 22px;
-    }
-
-    .old-price {
-      color: var(--muted);
-      text-decoration: line-through;
-      margin-left: 8px;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 3px 9px;
-      margin: 5px 0;
-      border-radius: 8px;
-      background: var(--gold);
-      color: #15130c;
-      font-weight: 800;
-      font-size: 13px;
-    }
-
-    .preview {
-      display: block;
-      width: 100%;
-      max-height: 260px;
-      object-fit: contain;
-      background: #161616;
-      border-radius: 12px;
-      margin: 12px 0;
-    }
-
-    .product-image {
-      width: 100%;
-      height: 170px;
-      object-fit: cover;
-      background: #161616;
-      border-radius: 10px;
-      margin-bottom: 12px;
-    }
-
-    .order-lines {
-      padding-left: 22px;
-    }
-
-    .order-lines li {
-      margin-bottom: 8px;
-    }
-
-    .order-status {
-      max-width: 280px;
-    }
-
-    .note {
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-    }
-
-    a {
-      color: var(--gold);
-    }
-
-    nav {
-      margin-bottom: 16px;
-    }
-
-    nav button[aria-pressed="true"] {
-      background: var(--gold);
-      color: #15130c;
-    }
-
-    @media (max-width: 760px) {
-      .layout,
-      .grid {
-        grid-template-columns: 1fr;
-      }
-
-      h1 {
-        font-size: 22px;
-      }
-
-      .panel,
-      .card {
-        padding: 15px;
-      }
-    }
-  </style>
-</head>
-
-<body>
-<main>
-  <header>
-    <div class="logo">ЛВ</div>
-    <div>
-      <h1>Лавка Вкуса</h1>
-      <div class="muted">Панель продавца</div>
-    </div>
-  </header>
-
-  <section id="loginPanel" class="panel">
-    <h2>Вход</h2>
-
-    <form id="loginForm">
-      <label>
-        Секретный ключ продавца
-        <input
-          id="adminToken"
-          type="password"
-          minlength="32"
-          required
-          autocomplete="off"
-          spellcheck="false"
-        >
-      </label>
-
-      <button id="loginButton" type="submit">Войти</button>
-    </form>
-
-    <p class="muted">
-      Используйте ADMIN_TOKEN из настроек Render.
-      Ключ не сохраняется в хранилище браузера.
-      После обновления страницы потребуется войти заново.
-    </p>
-
-    <p class="muted">
-      Первый запрос после простоя сервера может занять около минуты.
-    </p>
-
-    <div id="loginMessage" class="message" role="status"></div>
-  </section>
-
-  <section id="appPanel" hidden>
-    <nav class="row">
-      <button
-        id="productsTab"
-        type="button"
-        aria-pressed="true"
-      >Товары</button>
-
-      <button
-        id="ordersTab"
-        type="button"
-        class="secondary"
-        aria-pressed="false"
-      >Заказы</button>
-
-      <button
-        id="logoutButton"
-        type="button"
-        class="secondary"
-      >Выйти</button>
-    </nav>
-
-    <div id="globalMessage" class="message" role="status"></div>
-
-    <section id="productsSection">
-      <div class="layout">
-        <section class="panel">
-          <h2 id="editorTitle">Новый товар</h2>
-
-          <form id="productForm">
-            <label>
-              Код товара
-              <input
-                id="productId"
-                readonly
-                placeholder="Создаётся автоматически"
-              >
-            </label>
-
-            <label>
-              Название
-              <input
-                id="productName"
-                minlength="2"
-                maxlength="120"
-                required
-              >
-            </label>
-
-            <div class="grid">
-              <label>
-                Категория
-                <input
-                  id="productCategory"
-                  maxlength="80"
-                  value="Рыба и морепродукты"
-                >
-              </label>
-
-              <label>
-                Единица продажи
-                <select id="productUnit">
-                  <option value="кг">Килограмм — кг</option>
-                  <option value="шт">Штука — шт</option>
-                  <option value="уп">Упаковка — уп</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="grid">
-              <label>
-                Текущая цена, ₽
-                <input
-                  id="productPrice"
-                  type="number"
-                  min="1"
-                  max="1000000"
-                  step="1"
-                  required
-                >
-              </label>
-
-              <label>
-                Старая цена, ₽ — необязательно
-                <input
-                  id="productOldPrice"
-                  type="number"
-                  min="1"
-                  max="1000000"
-                  step="1"
-                  placeholder="Без акции"
-                >
-              </label>
-            </div>
-
-            <p class="muted">
-              Товар продаётся по текущей цене.
-              Для акции укажите реальную прежнюю цену выше текущей.
-              Чтобы убрать акцию, очистите старую цену.
-            </p>
-
-            <div id="promotionPreview" class="message"></div>
-
-            <label>
-              Порядок в каталоге
-              <input
-                id="productSort"
-                type="number"
-                min="-100000"
-                max="100000"
-                step="1"
-                value="0"
-                required
-              >
-            </label>
-
-            <label>
-              Описание
-              <textarea
-                id="productDescription"
-                maxlength="2000"
-              ></textarea>
-            </label>
-
-            <label>
-              Ссылка на фотографию
-              <input
-                id="productImageUrl"
-                type="url"
-                maxlength="1500"
-                placeholder="https://..."
-              >
-            </label>
-
-            <img
-              id="imagePreview"
-              class="preview"
-              alt="Предпросмотр фотографии"
-              referrerpolicy="no-referrer"
-              hidden
-            >
-
-            <label>
-              Выбрать фотографию с телефона
-              <input
-                id="imageFile"
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-              >
-            </label>
-
-            <p class="muted">
-              JPG, PNG или WEBP, до 5 МБ.
-              Сначала загрузите фото, затем сохраните товар.
-            </p>
-
-            <div class="row">
-              <button
-                id="uploadImageButton"
-                type="button"
-                class="secondary"
-              >Загрузить фото</button>
-
-              <button
-                id="removeImageButton"
-                type="button"
-                class="secondary"
-              >Убрать фото</button>
-            </div>
-
-            <div
-              id="imageMessage"
-              class="message"
-              role="status"
-            ></div>
-
-            <label class="check">
-              <input
-                id="productAvailable"
-                type="checkbox"
-                checked
-              >
-              Товар в наличии
-            </label>
-
-            <p class="muted">
-              Снимите отметку, чтобы скрыть товар из каталога.
-            </p>
-
-            <div class="row">
-              <button
-                id="saveProductButton"
-                type="submit"
-              >Сохранить товар</button>
-
-              <button
-                id="newProductButton"
-                type="button"
-                class="secondary"
-              >Новый товар</button>
-            </div>
-
-            <div
-              id="productMessage"
-              class="message"
-              role="status"
-            ></div>
-          </form>
-        </section>
-
-        <section>
-          <div class="row">
-            <h2>Ассортимент</h2>
-
-            <button
-              id="refreshProductsButton"
-              type="button"
-              class="secondary"
-            >Обновить</button>
-          </div>
-
-          <div
-            id="productsMessage"
-            class="message"
-            role="status"
-          ></div>
-
-          <div id="productsList"></div>
-        </section>
-      </div>
-    </section>
-
-    <section id="ordersSection" hidden>
-      <div class="row">
-        <h2>Заказы</h2>
-
-        <button
-          id="refreshOrdersButton"
-          type="button"
-          class="secondary"
-        >Обновить</button>
-      </div>
-
-      <p class="muted">
-        Статус покупатель увидит после обновления в разделе
-        «Мои заказы» приложения. Изменение статуса здесь
-        само по себе не отправляет уведомление в Telegram.
-      </p>
-
-      <div
-        id="ordersMessage"
-        class="message"
-        role="status"
-      ></div>
-
-      <div id="ordersList"></div>
-
-      <div class="row">
-        <button
-          id="previousPageButton"
-          type="button"
-          class="secondary"
-          disabled
-        >Назад</button>
-
-        <span id="pageLabel">Страница 1</span>
-
-        <button
-          id="nextPageButton"
-          type="button"
-          class="secondary"
-          disabled
-        >Далее</button>
-      </div>
-    </section>
-  </section>
-</main>
-
-<script>
-"use strict";
-
-const $ = (id) => document.getElementById(id);
-
-let token = "";
-let sessionVersion = 0;
-let editorVersion = 0;
-let productsRequestVersion = 0;
-
-let products = [];
-let ordersPage = 1;
-let ordersBusy = false;
-let uploading = false;
-let saving = false;
-let imageUploadConfigured = false;
-
-let localPreviewUrl = null;
-
-const activeRequests = new Set();
-
-const statuses = {
-  new: "Новый",
-  confirmed: "Подтверждён",
-  preparing: "Собирается",
-  delivering: "В доставке",
-  ready: "Готов к самовывозу",
-  completed: "Выполнен",
-  cancelled: "Отменён"
-};
-
-const telegramStatuses = {
-  sent: "Отправлено",
-  pending: "Ожидается",
-  unconfirmed: "Нет подтверждения",
-  not_configured: "Не настроено"
-};
-
-const moneyFormatter = new Intl.NumberFormat("ru-RU", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2
-});
-
-const quantityFormatter = new Intl.NumberFormat("ru-RU", {
-  maximumFractionDigits: 2
-});
-
-function money(value) {
-  const number = Number(value);
-  return Number.isFinite(number)
-    ? moneyFormatter.format(number) + " ₽"
-    : "—";
-}
-
-function quantity(value) {
-  const number = Number(value);
-  return Number.isFinite(number)
-    ? quantityFormatter.format(number)
-    : "—";
-}
-
-function message(id, value, kind = "") {
-  const element = $(id);
-  element.textContent = value || "";
-  element.className =
-    "message" + (kind ? " " + kind : "");
-}
-
-function element(tag, className, value) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (value !== undefined) node.textContent = value;
-  return node;
-}
-
-function isStale(error) {
-  return error && error.code === "STALE_SESSION";
-}
-
-function staleError() {
-  const error = new Error("Сеанс изменился.");
-  error.code = "STALE_SESSION";
-  return error;
-}
-
-function safeImageUrl(value) {
-  if (typeof value !== "string" || !value.trim()) {
-    return "";
-  }
-
-  try {
-    const parsed = new URL(value);
-
-    if (
-      parsed.protocol !== "https:" ||
-      parsed.username ||
-      parsed.password
-    ) {
-      return "";
-    }
-
-    return parsed.href;
-  } catch {
-    return "";
-  }
-}
-
-async function api(route, options = {}) {
-  const version = sessionVersion;
-  const requestToken = token;
-
-  if (!requestToken) {
-    throw new Error("Сначала войдите в панель.");
-  }
-
-  const controller = new AbortController();
-  activeRequests.add(controller);
-
-  const timeout = setTimeout(
-    () => controller.abort(),
-    120000
-  );
-
-  try {
-    const settings = {
-      method: options.method || "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: "Bearer " + requestToken
-      },
-      cache: "no-store",
-      redirect: "error",
-      signal: controller.signal
-    };
-
-    if (options.body !== undefined) {
-      settings.headers["Content-Type"] =
-        "application/json; charset=utf-8";
-
-      settings.body = JSON.stringify(options.body);
-    }
-
-    const response = await fetch(route, settings);
-
-    if (version !== sessionVersion) {
-      throw staleError();
-    }
-
-    if (response.status === 401) {
-      logout();
-      message(
-        "loginMessage",
-        "Сеанс завершён или ключ неверный. Войдите снова.",
-        "error"
-      );
-      throw staleError();
-    }
-
-    let data;
-
-    try {
-      data = await response.json();
-    } catch {
-      if (version !== sessionVersion) {
-        throw staleError();
-      }
-
-      throw new Error(
-        "Сервер вернул неожиданный ответ. Попробуйте позже."
-      );
-    }
-
-    if (version !== sessionVersion) {
-      throw staleError();
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        typeof data.error === "string"
-          ? data.error
-          : "Ошибка сервера: " + response.status
-      );
-    }
-
-    return data;
-  } catch (error) {
-    if (version !== sessionVersion) {
-      throw staleError();
-    }
-
-    if (error.name === "AbortError") {
-      throw new Error(
-        "Время ожидания истекло. Результат запроса " +
-        "не подтверждён. Обновите список перед повторением действия."
-      );
-    }
-
-    if (error instanceof TypeError) {
-      throw new Error(
-        "Не удалось связаться с сервером. " +
-        "Проверьте интернет и попробуйте позже."
-      );
-    }
-
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-    activeRequests.delete(controller);
-  }
-}
-
-function releaseLocalPreview() {
-  if (localPreviewUrl) {
-    URL.revokeObjectURL(localPreviewUrl);
-    localPreviewUrl = null;
-  }
-}
-
-function showPreview(url) {
-  const image = $("imagePreview");
-
-  if (!url) {
-    image.hidden = true;
-    image.removeAttribute("src");
-    return;
-  }
-
-  image.hidden = false;
-  image.src = url;
-}
-
-$("imagePreview").addEventListener("error", () => {
-  $("imagePreview").hidden = true;
-});
-
-function updatePromotionPreview() {
-  const price = Number($("productPrice").value);
-  const rawOldPrice = $("productOldPrice").value.trim();
-
-  if (!rawOldPrice) {
-    message("promotionPreview", "Без акции.");
-    return;
-  }
-
-  const oldPrice = Number(rawOldPrice);
-
-  if (
-    !Number.isInteger(price) ||
-    price <= 0 ||
-    !Number.isInteger(oldPrice) ||
-    oldPrice <= price
-  ) {
-    message(
-      "promotionPreview",
-      "Старая цена должна быть выше текущей.",
-      "error"
-    );
-    return;
-  }
-
-  const discount = Math.floor(
-    ((oldPrice - price) * 100) / oldPrice
-  );
-
-  const badge = discount >= 1
-    ? "Скидка " + discount + "%"
-    : "Акционная цена";
-
-  message(
-    "promotionPreview",
-    badge + ": " + money(oldPrice) +
-      " → " + money(price),
-    "success"
-  );
-}
-
-function syncEditorButtons() {
-  $("saveProductButton").disabled = saving || uploading;
-  $("newProductButton").disabled = saving || uploading;
-  $("uploadImageButton").disabled =
-    uploading || saving || !imageUploadConfigured;
-  $("removeImageButton").disabled = uploading || saving;
-  $("imageFile").disabled = uploading || saving;
-}
-
-function resetEditor() {
-  editorVersion += 1;
-  releaseLocalPreview();
-  $("productForm").reset();
-  $("productId").value = "";
-  $("productCategory").value = "Рыба и морепродукты";
-  $("productSort").value = "0";
-  $("productAvailable").checked = true;
-  $("editorTitle").textContent = "Новый товар";
-  showPreview("");
-  message("productMessage", "");
-  message("imageMessage", "");
-  updatePromotionPreview();
-  syncEditorButtons();
-}
-
-function editProduct(product) {
-  if (saving || uploading) {
-    message(
-      "productsMessage",
-      "Дождитесь окончания сохранения или загрузки фото.",
-      "error"
-    );
-    return;
-  }
-
-  resetEditor();
-
-  $("editorTitle").textContent = "Редактирование товара";
-  $("productId").value = product.id || "";
-  $("productName").value = product.name || "";
-  $("productCategory").value = product.category || "";
-  $("productUnit").value = product.unit || "кг";
-  $("productPrice").value = product.priceRub;
-  $("productOldPrice").value =
-    product.oldPriceRub == null ? "" : product.oldPriceRub;
-  $("productSort").value = product.sortOrder || 0;
-  $("productDescription").value = product.description || "";
-  $("productImageUrl").value = product.imageUrl || "";
-  $("productAvailable").checked = product.available === true;
-
-  showPreview(safeImageUrl(product.imageUrl));
-  updatePromotionPreview();
-
-  $("editorTitle").scrollIntoView({
-    behavior: "smooth",
-    block: "start"
-  });
-}
-
-function renderProducts() {
-  const list = $("productsList");
-  list.replaceChildren();
-
-  if (!products.length) {
-    list.append(element("p", "muted", "Товаров пока нет."));
-    return;
-  }
-
-  for (const product of products) {
-    const card = element("article", "card");
-
-    const imageUrl = safeImageUrl(product.imageUrl);
-
-    if (imageUrl) {
-      const image = element("img", "product-image");
-      image.alt = product.name || "Фотография товара";
-      image.loading = "lazy";
-      image.referrerPolicy = "no-referrer";
-      image.src = imageUrl;
-      image.addEventListener("error", () => image.remove());
-      card.append(image);
-    }
-
-    card.append(
-      element("h3", "", product.name),
-      element(
-        "p",
-        "muted",
-        (product.category || "") +
-          " · " +
-          (product.available ? "В наличии" : "Скрыт")
-      )
-    );
-
-    const priceLine = element("p");
-
-    priceLine.append(
-      element(
-        "span",
-        "price",
-        money(product.priceRub) + " / " + product.unit
-      )
-    );
-
-    const oldPrice = Number(product.oldPriceRub);
-    const currentPrice = Number(product.priceRub);
-
-    if (
-      product.oldPriceRub != null &&
-      oldPrice > currentPrice
-    ) {
-      priceLine.append(
-        element("span", "old-price", money(oldPrice))
-      );
-
-      const discount = Math.floor(
-        ((oldPrice - currentPrice) * 100) / oldPrice
-      );
-
-      card.append(
-        element(
-          "span",
-          "badge",
-          discount >= 1 ? "−" + discount + "%" : "Акция"
-        )
-      );
-    }
-
-    card.append(priceLine);
-
-    if (product.description) {
-      card.append(
-        element("p", "note muted", product.description)
-      );
-    }
-
-    const edit = element("button", "secondary", "Редактировать");
-    edit.type = "button";
-    edit.addEventListener("click", () => editProduct(product));
-    card.append(edit);
-    list.append(card);
-  }
-}
-
-async function loadProducts() {
-  const requestVersion = ++productsRequestVersion;
-  const version = sessionVersion;
-
-  message("productsMessage", "Загрузка товаров…");
-
-  try {
-    const data = await api("/api/admin/products");
-
-    if (
-      version !== sessionVersion ||
-      requestVersion !== productsRequestVersion
-    ) {
-      return;
-    }
-
-    if (!Array.isArray(data.products)) {
-      throw new Error("Сервер не вернул список товаров.");
-    }
-
-    products = data.products;
-    renderProducts();
-
-    message(
-      "productsMessage",
-      "Товаров: " + products.length,
-      "success"
-    );
-  } catch (error) {
-    if (
-      isStale(error) ||
-      requestVersion !== productsRequestVersion
-    ) {
-      return;
-    }
-
-    message("productsMessage", error.message, "error");
-  }
-}
-
-function logout() {
-  sessionVersion += 1;
-  productsRequestVersion += 1;
-
-  for (const controller of activeRequests) {
-    controller.abort();
-  }
-
-  activeRequests.clear();
-
-  token = "";
-  products = [];
-  ordersPage = 1;
-  ordersBusy = false;
-  uploading = false;
-  saving = false;
-  imageUploadConfigured = false;
-
-  $("adminToken").value = "";
-  $("loginButton").disabled = false;
-  $("appPanel").hidden = true;
-  $("loginPanel").hidden = false;
-
-  $("productsList").replaceChildren();
-  $("ordersList").replaceChildren();
-
-  message("globalMessage", "");
-  message("productsMessage", "");
-  message("ordersMessage", "");
-
-  resetEditor();
-}
-
-$("loginForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-
-  const value = $("adminToken").value.trim();
-
-  if (value.length < 32) {
-    message(
-      "loginMessage",
-      "Ключ должен содержать не менее 32 символов.",
-      "error"
-    );
-    return;
-  }
-
-  sessionVersion += 1;
-  const version = sessionVersion;
-
+  session++;
+  const version = session;
   token = value;
   $("adminToken").value = "";
   $("loginButton").disabled = true;
@@ -3809,663 +1600,47 @@ $("loginForm").addEventListener("submit", async (event) => {
 
   try {
     const config = await api("/api/admin/config");
+    if (version !== session) return;
 
-    if (version !== sessionVersion) return;
-
-    imageUploadConfigured =
-      config.imageUploadConfigured === true;
+    imagesEnabled = config.imageUploadConfigured === true;
+    scheduleEnabled = config.schedulingEnabled === true;
+    $("scheduleUnavailable").hidden = scheduleEnabled;
 
     $("loginPanel").hidden = true;
     $("appPanel").hidden = false;
 
-    resetEditor();
+    resetProduct();
+    resetSlot();
+    message("loginMessage");
+    message("globalMessage",
+      (imagesEnabled ? "Загрузка фото подключена. " : "Фото по HTTPS-ссылкам. ") +
+      (scheduleEnabled ? "Расписание подключено." :
+        "Поддержка расписания сервером не подтверждена."));
+
     showTab("products");
-
-    message("loginMessage", "");
-
-    message(
-      "globalMessage",
-      imageUploadConfigured
-        ? "Загрузка фотографий подключена. Акции доступны."
-        : "Хранилище фотографий не настроено. " +
-          "Можно использовать прямые HTTPS-ссылки."
-    );
   } catch (error) {
-    if (isStale(error)) return;
-
+    if (error.stale || version !== session) return;
     token = "";
     message("loginMessage", error.message, "error");
   } finally {
-    if (version === sessionVersion) {
-      $("loginButton").disabled = false;
-    }
+    if (version === session) $("loginButton").disabled = false;
   }
 });
 
-function showTab(tab) {
-  const productsVisible = tab === "products";
-
-  $("productsSection").hidden = !productsVisible;
-  $("ordersSection").hidden = productsVisible;
-
-  $("productsTab").setAttribute(
-    "aria-pressed",
-    String(productsVisible)
-  );
-
-  $("ordersTab").setAttribute(
-    "aria-pressed",
-    String(!productsVisible)
-  );
-
-  $("productsTab").className =
-    productsVisible ? "" : "secondary";
-
-  $("ordersTab").className =
-    productsVisible ? "secondary" : "";
-
-  if (productsVisible) {
-    loadProducts();
-  } else {
-    loadOrders(ordersPage);
-  }
-}
-
-$("productsTab").addEventListener(
-  "click",
-  () => showTab("products")
-);
-
-$("ordersTab").addEventListener(
-  "click",
-  () => showTab("orders")
-);
+$("productsTab").addEventListener("click", () => showTab("products"));
+$("ordersTab").addEventListener("click", () => showTab("orders"));
+$("scheduleTab").addEventListener("click", () => showTab("schedule"));
 
 $("logoutButton").addEventListener("click", () => {
   logout();
   message("loginMessage", "Вы вышли из панели.");
 });
 
-$("refreshProductsButton").addEventListener(
-  "click",
-  loadProducts
-);
-
-$("newProductButton").addEventListener("click", () => {
-  if (!saving && !uploading) resetEditor();
-});
-
-$("productPrice").addEventListener(
-  "input",
-  updatePromotionPreview
-);
-
-$("productOldPrice").addEventListener(
-  "input",
-  updatePromotionPreview
-);
-
-$("productImageUrl").addEventListener("input", () => {
-  releaseLocalPreview();
-  showPreview(safeImageUrl($("productImageUrl").value));
-});
-
-$("imageFile").addEventListener("change", () => {
-  releaseLocalPreview();
-  message("imageMessage", "");
-
-  const file = $("imageFile").files[0];
-
-  if (!file) {
-    showPreview(safeImageUrl($("productImageUrl").value));
-    return;
-  }
-
-  if (
-    !["image/jpeg", "image/png", "image/webp"].includes(file.type)
-  ) {
-    $("imageFile").value = "";
-    showPreview(safeImageUrl($("productImageUrl").value));
-    message(
-      "imageMessage",
-      "Выберите JPG, PNG или WEBP.",
-      "error"
-    );
-    return;
-  }
-
-  if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
-    $("imageFile").value = "";
-    showPreview(safeImageUrl($("productImageUrl").value));
-    message(
-      "imageMessage",
-      "Размер фотографии должен быть не больше 5 МБ.",
-      "error"
-    );
-    return;
-  }
-
-  localPreviewUrl = URL.createObjectURL(file);
-  showPreview(localPreviewUrl);
-
-  message(
-    "imageMessage",
-    "Фото выбрано. Нажмите «Загрузить фото», " +
-      "затем «Сохранить товар»."
-  );
-});
-
-function fileAsBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onerror = () => reject(
-      new Error("Не удалось прочитать фотографию.")
-    );
-
-    reader.onabort = () => reject(
-      new Error("Чтение фотографии прервано.")
-    );
-
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      const comma = result.indexOf(",");
-
-      if (comma < 0) {
-        reject(new Error("Не удалось прочитать фотографию."));
-        return;
-      }
-
-      resolve(result.slice(comma + 1));
-    };
-
-    reader.readAsDataURL(file);
-  });
-}
-
-$("uploadImageButton").addEventListener("click", async () => {
-  if (uploading || saving) return;
-
-  const file = $("imageFile").files[0];
-
-  if (!file) {
-    message("imageMessage", "Сначала выберите фото.", "error");
-    return;
-  }
-
-  if (
-    !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
-    file.size <= 0 ||
-    file.size > 5 * 1024 * 1024
-  ) {
-    message(
-      "imageMessage",
-      "Нужна фотография JPG, PNG или WEBP до 5 МБ.",
-      "error"
-    );
-    return;
-  }
-
-  const version = sessionVersion;
-  const editor = editorVersion;
-
-  uploading = true;
-  syncEditorButtons();
-  message("imageMessage", "Загрузка фотографии…");
-
-  try {
-    const base64 = await fileAsBase64(file);
-
-    if (
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) {
-      return;
-    }
-
-    const data = await api("/api/admin/images", {
-      method: "POST",
-      body: {
-        mimeType: file.type,
-        base64
-      }
-    });
-
-    if (
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) {
-      return;
-    }
-
-    const imageUrl = safeImageUrl(data.imageUrl);
-
-    if (!imageUrl) {
-      throw new Error("Сервер не вернул ссылку на фото.");
-    }
-
-    $("productImageUrl").value = imageUrl;
-    $("imageFile").value = "";
-
-    releaseLocalPreview();
-    showPreview(imageUrl);
-
-    message(
-      "imageMessage",
-      "Фото загружено в хранилище. " +
-        "Теперь нажмите «Сохранить товар».",
-      "success"
-    );
-  } catch (error) {
-    if (
-      isStale(error) ||
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) {
-      return;
-    }
-
-    message("imageMessage", error.message, "error");
-  } finally {
-    if (
-      version === sessionVersion &&
-      editor === editorVersion
-    ) {
-      uploading = false;
-      syncEditorButtons();
-    }
-  }
-});
-
-$("removeImageButton").addEventListener("click", () => {
-  if (uploading || saving) return;
-
-  releaseLocalPreview();
-  $("productImageUrl").value = "";
-  $("imageFile").value = "";
-  showPreview("");
-
-  message(
-    "imageMessage",
-    "Фото убрано из формы. Сохраните товар. " +
-      "Сам файл в Cloudinary не удаляется."
-  );
-});
-
-$("productForm").addEventListener("submit", async (event) => {
-  event.preventDefault();
-
-  if (saving || uploading) return;
-
-  const id = $("productId").value.trim();
-  const price = Number($("productPrice").value);
-  const oldPriceText = $("productOldPrice").value.trim();
-  const oldPrice = oldPriceText ? Number(oldPriceText) : null;
-  const imageUrl = $("productImageUrl").value.trim();
-
-  if (
-    !Number.isInteger(price) ||
-    price < 1 ||
-    price > 1000000
-  ) {
-    message(
-      "productMessage",
-      "Укажите целую текущую цену от 1 до 1000000 ₽.",
-      "error"
-    );
-    return;
-  }
-
-  if (
-    oldPrice !== null &&
-    (
-      !Number.isInteger(oldPrice) ||
-      oldPrice <= price ||
-      oldPrice > 1000000
-    )
-  ) {
-    message(
-      "productMessage",
-      "Старая цена должна быть целой, выше текущей " +
-        "и не больше 1000000 ₽.",
-      "error"
-    );
-    return;
-  }
-
-  if (imageUrl && !safeImageUrl(imageUrl)) {
-    message(
-      "productMessage",
-      "Нужна обычная HTTPS-ссылка на фото.",
-      "error"
-    );
-    return;
-  }
-
-  if ($("imageFile").files.length) {
-    message(
-      "productMessage",
-      "Выбрано незагруженное фото. Сначала нажмите " +
-        "«Загрузить фото» или отмените выбор файла.",
-      "error"
-    );
-    return;
-  }
-
-  const body = {
-    name: $("productName").value.trim(),
-    category: $("productCategory").value.trim(),
-    unit: $("productUnit").value,
-    priceRub: price,
-    oldPriceRub: oldPrice,
-    sortOrder: Number($("productSort").value),
-    description: $("productDescription").value.trim(),
-    imageUrl,
-    available: $("productAvailable").checked
-  };
-
-  const route = id
-    ? "/api/admin/products/" + encodeURIComponent(id)
-    : "/api/admin/products";
-
-  const version = sessionVersion;
-  const editor = editorVersion;
-
-  saving = true;
-  syncEditorButtons();
-  message("productMessage", "Сохранение…");
-
-  try {
-    const data = await api(route, {
-      method: id ? "PUT" : "POST",
-      body
-    });
-
-    if (
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) {
-      return;
-    }
-
-    if (data.product && data.product.id) {
-      $("productId").value = data.product.id;
-      $("editorTitle").textContent = "Редактирование товара";
-    }
-
-    message(
-      "productMessage",
-      "Товар сохранён. В приложении обновите ассортимент.",
-      "success"
-    );
-
-    await loadProducts();
-  } catch (error) {
-    if (
-      isStale(error) ||
-      version !== sessionVersion ||
-      editor !== editorVersion
-    ) {
-      return;
-    }
-
-    message("productMessage", error.message, "error");
-  } finally {
-    if (
-      version === sessionVersion &&
-      editor === editorVersion
-    ) {
-      saving = false;
-      syncEditorButtons();
-    }
-  }
-});
-
-function dateLabel(value) {
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime())
-    ? "Дата не указана"
-    : date.toLocaleString("ru-RU");
-}
-
-function renderOrder(order) {
-  const card = element("article", "card");
-  const number = Number(order.orderNumber);
-
-  card.append(
-    element(
-      "h3",
-      "",
-      Number.isSafeInteger(number) && number > 0
-        ? "Заказ № " + number
-        : "Заказ " + (order.id || "")
-    ),
-    element("p", "muted", dateLabel(order.createdAt)),
-    element("p", "", "Покупатель: " + (order.name || "—"))
-  );
-
-  const phoneLine = element("p");
-  phoneLine.append(document.createTextNode("Телефон: "));
-
-  const phone = String(order.phone || "");
-  const digits = phone.replace(/\D/g, "");
-
-  if (/^[78]\d{10}$/.test(digits)) {
-    const link = element("a", "", phone);
-    link.href = "tel:+" + digits;
-    phoneLine.append(link);
-  } else {
-    phoneLine.append(document.createTextNode(phone || "—"));
-  }
-
-  card.append(phoneLine);
-
-  card.append(
-    element(
-      "p",
-      "note",
-      order.fulfillment === "pickup"
-        ? "Самовывоз: г. Макеевка, ул. Плеханова, 1в, " +
-          "магазин «Лавка Вкуса»"
-        : "Доставка: " + (order.address || "—")
-    )
-  );
-
-  const list = element("ul", "order-lines");
-
-  for (const item of Array.isArray(order.items) ? order.items : []) {
-    list.append(
-      element(
-        "li",
-        "",
-        (item.name || "Товар") + ": " +
-          quantity(item.quantity) + " " + (item.unit || "") +
-          " × " + money(item.priceRub) +
-          " = " + money(item.totalRub)
-      )
-    );
-  }
-
-  card.append(
-    list,
-    element("p", "price", "Товары: " + money(order.totalRub))
-  );
-
-  const deliveryNote = order.fulfillment === "pickup"
-    ? "Оплата при получении."
-    : Number(order.totalRub) >= 2000
-      ? "Бесплатная доставка по Макеевке, Донецку и Харцызску. " +
-        "Другие города — по согласованию. Оплата при получении."
-      : "Стоимость доставки — по согласованию. Оплата при получении.";
-
-  card.append(element("p", "muted", deliveryNote));
-
-  if (order.comment) {
-    card.append(
-      element("p", "note", "Комментарий: " + order.comment)
-    );
-  }
-
-  card.append(
-    element(
-      "p",
-      "muted",
-      "Telegram: " +
-        (telegramStatuses[order.telegramStatus] || "Неизвестно")
-    )
-  );
-
-  const label = element("label", "", "Статус заказа");
-  const select = element("select", "order-status");
-
-  for (const [value, title] of Object.entries(statuses)) {
-    const option = element("option", "", title);
-    option.value = value;
-    select.append(option);
-  }
-
-  select.value = order.status || "new";
-  label.append(select);
-
-  const save = element(
-    "button",
-    "secondary",
-    "Сохранить статус"
-  );
-
-  save.type = "button";
-
-  const statusMessage = element("div", "message");
-  statusMessage.setAttribute("role", "status");
-
-  save.addEventListener("click", async () => {
-    const version = sessionVersion;
-    save.disabled = true;
-    select.disabled = true;
-    statusMessage.className = "message";
-    statusMessage.textContent = "Сохранение…";
-
-    try {
-      const data = await api(
-        "/api/admin/orders/" +
-          encodeURIComponent(order.id) +
-          "/status",
-        {
-          method: "PATCH",
-          body: { status: select.value }
-        }
-      );
-
-      if (version !== sessionVersion) return;
-
-      if (data.order) {
-        order.status = data.order.status;
-        select.value = order.status;
-      }
-
-      statusMessage.className = "message success";
-      statusMessage.textContent = "Статус сохранён.";
-    } catch (error) {
-      if (isStale(error) || version !== sessionVersion) {
-        return;
-      }
-
-      statusMessage.className = "message error";
-      statusMessage.textContent = error.message;
-    } finally {
-      if (version === sessionVersion) {
-        save.disabled = false;
-        select.disabled = false;
-      }
-    }
-  });
-
-  card.append(label, save, statusMessage);
-
-  return card;
-}
-
-async function loadOrders(page) {
-  if (ordersBusy) return;
-
-  const version = sessionVersion;
-  ordersBusy = true;
-
-  $("refreshOrdersButton").disabled = true;
-  $("previousPageButton").disabled = true;
-  $("nextPageButton").disabled = true;
-
-  message("ordersMessage", "Загрузка заказов…");
-
-  let loaded = false;
-  let hasNext = false;
-
-  try {
-    const data = await api(
-      "/api/admin/orders?page=" + encodeURIComponent(page)
-    );
-
-    if (version !== sessionVersion) return;
-
-    if (!Array.isArray(data.orders)) {
-      throw new Error("Сервер не вернул список заказов.");
-    }
-
-    ordersPage = page;
-
-    const list = $("ordersList");
-    list.replaceChildren();
-
-    for (const order of data.orders) {
-      list.append(renderOrder(order));
-    }
-
-    if (!data.orders.length) {
-      list.append(
-        element("p", "muted", "На этой странице заказов нет.")
-      );
-    }
-
-    $("pageLabel").textContent = "Страница " + ordersPage;
-
-    hasNext = data.orders.length >= 50;
-    loaded = true;
-
-    message(
-      "ordersMessage",
-      "Загружено заказов: " + data.orders.length,
-      "success"
-    );
-  } catch (error) {
-    if (isStale(error)) return;
-    message("ordersMessage", error.message, "error");
-  } finally {
-    if (version === sessionVersion) {
-      ordersBusy = false;
-      $("refreshOrdersButton").disabled = false;
-      $("previousPageButton").disabled = ordersPage <= 1;
-      $("nextPageButton").disabled = !loaded || !hasNext;
-    }
-  }
-}
-
-$("refreshOrdersButton").addEventListener(
-  "click",
-  () => loadOrders(ordersPage)
-);
-
-$("previousPageButton").addEventListener("click", () => {
-  if (ordersPage > 1) loadOrders(ordersPage - 1);
-});
-
-$("nextPageButton").addEventListener("click", () => {
-  loadOrders(ordersPage + 1);
-});
-
-window.addEventListener("pagehide", releaseLocalPreview);
-
-resetEditor();
+window.addEventListener("pagehide", releasePreview);
+
+resetProduct();
+resetSlot();
+})();
 </script>
 </body>
 </html>
