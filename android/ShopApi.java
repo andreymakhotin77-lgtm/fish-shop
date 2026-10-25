@@ -56,6 +56,8 @@ public class ShopApi {
 
         public boolean shouldClearPendingOrder() {
             /*
+             * Используется только при отправке заказа.
+             *
              * Конфликт 409 не означает, что заказ не создан.
              * Такой запрос нельзя автоматически заменять новым.
              */
@@ -78,12 +80,6 @@ public class ShopApi {
 
     // -------------------- РАСПИСАНИЕ --------------------
 
-    /*
-     * Загружает все доступные будущие интервалы.
-     * В ответе находятся:
-     * slots — массив интервалов;
-     * scheduleOptions — настройки расписания.
-     */
     public void loadReceivingSlots(Callback callback) {
         request(
                 "GET",
@@ -93,10 +89,6 @@ public class ShopApi {
         );
     }
 
-    /*
-     * Загружает интервалы только для выбранного
-     * способа получения: delivery или pickup.
-     */
     public void loadReceivingSlots(
             String fulfillment,
             Callback callback
@@ -131,8 +123,9 @@ public class ShopApi {
             Callback callback
     ) {
         /*
-         * Поля заказа передаются без изменения.
-         * В том числе receivingSlotId и orderAccessToken.
+         * Содержимое заказа передаётся без изменения.
+         * Сохраняются requestId, receivingSlotId
+         * и orderAccessToken.
          */
         request(
                 "POST",
@@ -144,17 +137,22 @@ public class ShopApi {
 
     // -------------------- ПРОВЕРКА ЗАКАЗА --------------------
 
+    private boolean validOrderAccess(
+            String orderId,
+            String orderAccessToken
+    ) {
+        return orderId != null &&
+                orderId.matches(ORDER_ID_PATTERN) &&
+                orderAccessToken != null &&
+                orderAccessToken.matches("[0-9a-f]{64}");
+    }
+
     public void loadOrder(
             String orderId,
             String orderAccessToken,
             Callback callback
     ) {
-        if (
-                orderId == null ||
-                !orderId.matches(ORDER_ID_PATTERN) ||
-                orderAccessToken == null ||
-                !orderAccessToken.matches("[0-9a-f]{64}")
-        ) {
+        if (!validOrderAccess(orderId, orderAccessToken)) {
             postError(
                     callback,
                     new ApiError(
@@ -185,8 +183,109 @@ public class ShopApi {
                     callback,
                     new ApiError(
                             0,
+                            "Не удалось подготовить проверку заказа."
+                    )
+            );
+        }
+    }
+
+    // -------------------- PUSH-УВЕДОМЛЕНИЯ --------------------
+
+    public void subscribeOrderPush(
+            String orderId,
+            String orderAccessToken,
+            String fcmToken,
+            Callback callback
+    ) {
+        requestPushSubscription(
+                "/api/orders/push/subscribe",
+                orderId,
+                orderAccessToken,
+                fcmToken,
+                callback
+        );
+    }
+
+    public void unsubscribeOrderPush(
+            String orderId,
+            String orderAccessToken,
+            String fcmToken,
+            Callback callback
+    ) {
+        requestPushSubscription(
+                "/api/orders/push/unsubscribe",
+                orderId,
+                orderAccessToken,
+                fcmToken,
+                callback
+        );
+    }
+
+    private void requestPushSubscription(
+            String route,
+            String orderId,
+            String orderAccessToken,
+            String fcmToken,
+            Callback callback
+    ) {
+        if (!validOrderAccess(orderId, orderAccessToken)) {
+            postError(
+                    callback,
+                    new ApiError(
+                            0,
+                            "Не удалось подтвердить доступ к заказу " +
+                            "для настройки уведомлений."
+                    )
+            );
+            return;
+        }
+
+        if (
+                fcmToken == null ||
+                fcmToken.length() < 20 ||
+                fcmToken.length() > 4096 ||
+                !fcmToken.matches("[A-Za-z0-9_:\\-]+")
+        ) {
+            postError(
+                    callback,
+                    new ApiError(
+                            0,
+                            "Не удалось получить корректный " +
+                            "адрес устройства для уведомлений."
+                    )
+            );
+            return;
+        }
+
+        try {
+            JSONObject body = new JSONObject();
+
+            body.put("id", orderId);
+            body.put("orderAccessToken", orderAccessToken);
+            body.put("fcmToken", fcmToken);
+
+            /*
+             * Секрет передаётся только в JSON по HTTPS.
+             * Он не добавляется в адресную строку
+             * и не выводится в журнал.
+             *
+             * Запрос не создаёт заказ
+             * и не меняет его статус.
+             */
+            request(
+                    "POST",
+                    route,
+                    body,
+                    callback
+            );
+
+        } catch (Exception error) {
+            postError(
+                    callback,
+                    new ApiError(
+                            0,
                             "Не удалось подготовить " +
-                            "проверку заказа."
+                            "настройку уведомлений."
                     )
             );
         }
@@ -212,8 +311,9 @@ public class ShopApi {
         }
 
         /*
-         * Создаём снимок тела до запуска фонового потока.
-         * Позднейшие изменения JSONObject не изменят запрос.
+         * Снимок тела создаётся до фонового потока.
+         * Позднейшие изменения JSONObject
+         * не изменят отправляемый запрос.
          */
         final String payload =
                 body == null ? null : body.toString();
@@ -299,8 +399,8 @@ public class ShopApi {
                         data = new JSONObject(response);
                     } catch (Exception error) {
                         /*
-                         * Не очищаем неподтверждённый заказ,
-                         * если ответ нельзя достоверно прочитать.
+                         * Нечитаемый ответ не доказывает,
+                         * что операция на сервере не выполнена.
                          */
                         throw new ApiError(
                                 0,
@@ -435,6 +535,12 @@ public class ShopApi {
             Callback callback,
             ApiError error
     ) {
+        if (callback == null) {
+            throw new IllegalArgumentException(
+                    "Не задан обработчик ответа."
+            );
+        }
+
         main.post(() -> {
             if (!closed) {
                 callback.onError(error);
@@ -443,10 +549,6 @@ public class ShopApi {
     }
 
     private void postClosedError(Callback callback) {
-        /*
-         * Отдельно сообщаем о попытке нового запроса
-         * через уже закрытый клиент.
-         */
         main.post(() -> callback.onError(
                 new ApiError(
                         0,
