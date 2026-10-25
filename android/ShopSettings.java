@@ -29,6 +29,18 @@ import android.widget.Toast;
  */
 public final class ShopSettings {
 
+    // LAVKA_SETTINGS_DIALOG_LIFECYCLE
+    private static AlertDialog activeDialog;
+
+    public static void dismiss() {
+        AlertDialog previous = activeDialog;
+        activeDialog = null;
+
+        if (previous != null && previous.isShowing()) {
+            previous.dismiss();
+        }
+    }
+
     private static final String PREFS =
             "lavka_device_lock_v1";
 
@@ -256,6 +268,7 @@ public final class ShopSettings {
                 "историю и ключи просмотра заказов."
         );
 
+        activeDialog = dialog;
         dialog.show();
 
         if (dialog.getWindow() != null) {
@@ -300,7 +313,7 @@ public final class ShopSettings {
                 current == 0L ? 0 :
                 current == 60000L ? 2 : 1;
 
-        new AlertDialog.Builder(
+        AlertDialog choice = new AlertDialog.Builder(
                 activity,
                 android.R.style.Theme_Material_Dialog_Alert
         )
@@ -336,7 +349,10 @@ public final class ShopSettings {
                         (dialog, which) ->
                                 show(activity, actions)
                 )
-                .show();
+                .create();
+
+        activeDialog = choice;
+        choice.show();
     }
 
     private static String delayLabel(long value) {
