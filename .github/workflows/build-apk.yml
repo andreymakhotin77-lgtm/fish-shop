@@ -39,7 +39,9 @@ jobs:
             android/StoreActivity.java \
             android/ShopApi.java \
             android/ProductArtwork.java \
-            android/ProductPhoto.java
+            android/ProductPhoto.java \
+            android/PushNotifications.java \
+            android/google-services.json
           do
             if [ ! -s "$file" ]; then
               echo "::error::Missing or empty file: $file"
@@ -48,6 +50,33 @@ jobs:
           done
 
           test -s signing/lavka-release.p12.gpg
+
+          python3 - <<'PY'
+          import json
+
+          with open(
+              "android/google-services.json",
+              encoding="utf-8"
+          ) as source:
+              config = json.load(source)
+
+          clients = config.get("client", [])
+
+          package_names = [
+              client.get("client_info", {})
+                    .get("android_client_info", {})
+                    .get("package_name")
+              for client in clients
+          ]
+
+          if "ru.makeevka.fishshop" not in package_names:
+              raise SystemExit(
+                  "Firebase config must contain package "
+                  "ru.makeevka.fishshop"
+              )
+
+          print("Firebase Android package verified")
+          PY
 
       - name: Decrypt signing key
         shell: bash
@@ -90,6 +119,7 @@ jobs:
 
           mkdir -p app/src/main/java/ru/makeevka/fishshop
           mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/mipmap-anydpi-v26
 
           cat > settings.gradle <<'EOF'
@@ -118,6 +148,7 @@ jobs:
           cat > build.gradle <<'EOF'
           plugins {
               id 'com.android.application' version '8.7.3' apply false
+              id 'com.google.gms.google-services' version '4.4.2' apply false
           }
           EOF
 
@@ -129,6 +160,7 @@ jobs:
           cat > app/build.gradle <<'EOF'
           plugins {
               id 'com.android.application'
+              id 'com.google.gms.google-services'
           }
 
           def buildNumber = Integer.parseInt(
@@ -145,7 +177,7 @@ jobs:
                   targetSdk 34
 
                   versionCode 1000 + buildNumber
-                  versionName "0.6-test.${buildNumber}"
+                  versionName "0.7-push-test.${buildNumber}"
               }
 
               signingConfigs {
@@ -176,6 +208,13 @@ jobs:
                   targetCompatibility JavaVersion.VERSION_17
               }
           }
+
+          dependencies {
+              implementation platform(
+                  'com.google.firebase:firebase-bom:33.7.0'
+              )
+              implementation 'com.google.firebase:firebase-messaging'
+          }
           EOF
 
           cat > app/src/main/AndroidManifest.xml <<'EOF'
@@ -184,6 +223,9 @@ jobs:
 
               <uses-permission
                   android:name="android.permission.INTERNET" />
+
+              <uses-permission
+                  android:name="android.permission.POST_NOTIFICATIONS" />
 
               <application
                   android:allowBackup="false"
@@ -194,9 +236,22 @@ jobs:
                   android:usesCleartextTraffic="false"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
+                  <meta-data
+                      android:name="com.google.firebase.messaging.default_notification_icon"
+                      android:resource="@drawable/ic_notification" />
+
+                  <meta-data
+                      android:name="com.google.firebase.messaging.default_notification_color"
+                      android:resource="@color/notification_gold" />
+
+                  <meta-data
+                      android:name="com.google.firebase.messaging.default_notification_channel_id"
+                      android:value="lavka_orders_v1" />
+
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
+                      android:launchMode="singleTop"
                       android:windowSoftInputMode="adjustResize">
 
                       <intent-filter>
@@ -206,12 +261,47 @@ jobs:
 
                   </activity>
 
+                  <service
+                      android:name=".PushNotifications$MessagingService"
+                      android:exported="false">
+
+                      <intent-filter>
+                          <action android:name="com.google.firebase.MESSAGING_EVENT" />
+                      </intent-filter>
+
+                  </service>
+
               </application>
           </manifest>
           EOF
 
+          cat > app/src/main/res/values/colors.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="notification_gold">#D4AF37</color>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_notification.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="24dp"
+              android:height="24dp"
+              android:viewportWidth="24"
+              android:viewportHeight="24">
+
+              <path
+                  android:fillColor="#FFFFFFFF"
+                  android:pathData="M3,19 L8,5 L12,5 L16,19 L12,19 L10,10 L7,19 Z M17,5 L21,5 L21,19 L17,19 Z" />
+
+          </vector>
+          EOF
+
           cp android/*.java \
             app/src/main/java/ru/makeevka/fishshop/
+
+          cp android/google-services.json \
+            app/google-services.json
 
       - name: Create black and gold icon
         shell: bash
