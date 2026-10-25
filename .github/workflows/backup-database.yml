@@ -1,0 +1,124 @@
+name: Backup database
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lavka-database-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Create and encrypt database backup
+        shell: bash
+        env:
+          PGDATABASE: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_PASSWORD: ${{ secrets.BACKUP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if [[ -z "${PGDATABASE:-}" ]]; then
+            echo "::error::Не найден секрет BACKUP_DATABASE_URL."
+            exit 1
+          fi
+
+          if [[ "${#BACKUP_PASSWORD}" -lt 32 ]]; then
+            echo "::error::Секрет BACKUP_PASSWORD должен содержать не менее 32 символов."
+            exit 1
+          fi
+
+          case "$PGDATABASE" in
+            postgresql://*|postgres://*)
+              ;;
+            *)
+              echo "::error::BACKUP_DATABASE_URL должен содержать полный внешний адрес PostgreSQL."
+              exit 1
+              ;;
+          esac
+
+          TEMP_DIR="$(mktemp -d "$RUNNER_TEMP/lavka-backup.XXXXXX")"
+          OUTPUT_DIR="$GITHUB_WORKSPACE/backups"
+          PLAIN_FILE="$TEMP_DIR/database.dump"
+
+          cleanup() {
+            rm -rf -- "$TEMP_DIR"
+          }
+
+          trap cleanup EXIT
+
+          mkdir -p "$OUTPUT_DIR"
+
+          STAMP="$(date -u +%Y-%m-%d_%H-%M-%S)"
+          ENCRYPTED_FILE="$OUTPUT_DIR/lavka-vkusa_${STAMP}_UTC.dump.gpg"
+
+          echo "Подготавливаем PostgreSQL 18..."
+          docker pull postgres:18
+
+          echo "Создаём согласованную копию базы..."
+          docker run --rm \
+            --env PGDATABASE \
+            postgres:18 \
+            pg_dump \
+              --format=custom \
+              --no-owner \
+              --no-acl \
+              > "$PLAIN_FILE"
+
+          if [[ ! -s "$PLAIN_FILE" ]]; then
+            echo "::error::Резервная копия оказалась пустой."
+            exit 1
+          fi
+
+          echo "Проверяем структуру архива..."
+          docker run --rm -i \
+            postgres:18 \
+            pg_restore --list \
+            < "$PLAIN_FILE" \
+            > /dev/null
+
+          echo "Шифруем резервную копию..."
+          gpg \
+            --batch \
+            --yes \
+            --no-symkey-cache \
+            --pinentry-mode loopback \
+            --passphrase-fd 3 \
+            --symmetric \
+            --cipher-algo AES256 \
+            --output "$ENCRYPTED_FILE" \
+            "$PLAIN_FILE" \
+            3<<<"$BACKUP_PASSWORD"
+
+          echo "Проверяем расшифровку и совпадение содержимого..."
+          gpg \
+            --batch \
+            --yes \
+            --no-symkey-cache \
+            --pinentry-mode loopback \
+            --passphrase-fd 3 \
+            --decrypt \
+            "$ENCRYPTED_FILE" \
+            3<<<"$BACKUP_PASSWORD" \
+            | cmp -- "$PLAIN_FILE" -
+
+          echo "Проверки завершены. Подготовлен зашифрованный архив."
+
+      - name: Save encrypted backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: lavka-database-backup-${{ github.run_number }}
+          path: backups/*.dump.gpg
+          if-no-files-found: error
+          retention-days: 30
+
+# КОНЕЦ ФАЙЛА
