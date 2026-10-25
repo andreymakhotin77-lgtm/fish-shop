@@ -34,6 +34,9 @@ const FREE_DELIVERY_CITIES = [
   "Харцызск"
 ];
 
+const STORE_TIME_ZONE = "Europe/Moscow";
+const SCHEDULE_DAYS_AHEAD = 60;
+
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_UPLOAD_BODY_BYTES = 7 * 1024 * 1024 + 16384;
 
@@ -42,6 +45,9 @@ const UUID_PATTERN =
 
 const ORDER_ID_PATTERN =
   /^LV-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+const SLOT_ID_PATTERN =
+  /^slot-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 const PRODUCT_ID_PATTERN = /^[a-z0-9_-]{1,80}$/;
@@ -210,6 +216,7 @@ async function readJson(req, maxBytes = 32768) {
     req.on("end", () => {
       if (finished) return;
       finished = true;
+
       const result = Buffer.concat(chunks);
       chunks = [];
       resolve(result);
@@ -271,8 +278,6 @@ function deliveryOptions() {
 function normalizeDeliveryCity(data, fulfillment) {
   if (fulfillment !== "delivery") return "";
 
-  // Старые версии приложения не передают это поле.
-  // Не определяем город автоматически по строке адреса.
   if (
     !Object.prototype.hasOwnProperty.call(
       data,
@@ -301,6 +306,11 @@ function normalizeDeliveryCity(data, fulfillment) {
 
   const normalized = raw.replace(/\s+/g, " ");
 
+  /*
+   * Сохраняем прежнее правило сервера:
+   * для другого города необходимо его название,
+   * а не условное значение «Другой город».
+   */
   if (
     ["другой город", "другой", "other"]
       .includes(cityKey(normalized))
@@ -385,7 +395,8 @@ function calculateDeliveryInfo(
       remainingRub: 0,
       deliveryFeeRub: 0,
       deliveryFeeStatus: "free",
-      message: `Доставка по городу ${deliveryCity} — бесплатно.`
+      message:
+        `Доставка по городу ${deliveryCity} — бесплатно.`
     };
   }
 
@@ -407,8 +418,6 @@ function calculateDeliveryInfo(
 }
 
 function storedDeliveryInfo(row) {
-  // Возвращаем условия, сохранённые при оформлении,
-  // а не пересчитываем историю по новым правилам.
   const saved = row.delivery_terms;
 
   if (
@@ -433,7 +442,6 @@ function storedDeliveryInfo(row) {
     };
   }
 
-  // Не меняем условия старого заказа задним числом.
   return {
     policyVersion: null,
     city: row.delivery_city || "",
@@ -445,6 +453,528 @@ function storedDeliveryInfo(row) {
     message:
       "Условия доставки этого старого заказа " +
       "уточняйте по ранее достигнутой договорённости с магазином."
+  };
+}
+
+// -------------------- ДАТЫ И ИНТЕРВАЛЫ --------------------
+
+const storeDateFormatter = new Intl.DateTimeFormat(
+  "en-GB",
+  {
+    timeZone: STORE_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }
+);
+
+function storeToday() {
+  const parts = storeDateFormatter.formatToParts(new Date());
+
+  const get = (type) =>
+    parts.find((part) => part.type === type).value;
+
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function validDate(value) {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(value)
+  ) {
+    return false;
+  }
+
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+
+  return (
+    Number.isFinite(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
+}
+
+function addDays(date, count) {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + count);
+  return value.toISOString().slice(0, 10);
+}
+
+function validTime(value) {
+  return (
+    typeof value === "string" &&
+    /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+  );
+}
+
+function displaySlotDate(value) {
+  const [year, month, day] = value.split("-");
+  return `${day}.${month}.${year}`;
+}
+
+function scheduleOptions() {
+  return {
+    enabled: true,
+    timeZone: STORE_TIME_ZONE,
+    timeZoneLabel: "Московское время, UTC+3",
+    daysAhead: SCHEDULE_DAYS_AHEAD,
+    slotField: "receivingSlotId",
+    requiredForLegacyClients: false,
+    capacityLimited: false,
+    citySpecific: false,
+    message:
+      "Выбор интервала не заменяет подтверждение магазина. " +
+      "Для других городов возможность доставки " +
+      "согласуется отдельно."
+  };
+}
+
+function slotView(row) {
+  const date = row.date_text;
+  const startTime = row.start_text;
+  const endTime = row.end_text;
+
+  return {
+    id: row.id,
+    date,
+    startTime,
+    endTime,
+    fulfillment: row.fulfillment,
+    enabled: row.enabled,
+    timeZone: STORE_TIME_ZONE,
+    label:
+      `${displaySlotDate(date)}, ` +
+      `${startTime}–${endTime}`,
+    updatedAt: row.updated_at
+  };
+}
+
+function storedReceivingSlot(row) {
+  const slot = row.receiving_slot;
+
+  if (
+    !slot ||
+    typeof slot !== "object" ||
+    Array.isArray(slot) ||
+    !SLOT_ID_PATTERN.test(slot.id || "") ||
+    !validDate(slot.date) ||
+    !validTime(slot.startTime) ||
+    !validTime(slot.endTime) ||
+    slot.startTime >= slot.endTime ||
+    slot.fulfillment !== row.fulfillment
+  ) {
+    return null;
+  }
+
+  return {
+    id: slot.id,
+    date: slot.date,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
+    fulfillment: slot.fulfillment,
+    timeZone: slot.timeZone || STORE_TIME_ZONE,
+    label:
+      `${displaySlotDate(slot.date)}, ` +
+      `${slot.startTime}–${slot.endTime}`
+  };
+}
+
+function normalizeSlot(data) {
+  const date = data.date;
+  const startTime = data.startTime;
+  const endTime = data.endTime;
+  const fulfillment = data.fulfillment;
+
+  const enabled =
+    data.enabled === undefined ? true : data.enabled;
+
+  if (!validDate(date)) {
+    throw fail(400, "Выберите корректную дату интервала.");
+  }
+
+  const today = storeToday();
+  const lastDate = addDays(today, SCHEDULE_DAYS_AHEAD);
+
+  if (date < today || date > lastDate) {
+    throw fail(
+      400,
+      `Интервалы можно настраивать на сегодня ` +
+      `и ближайшие ${SCHEDULE_DAYS_AHEAD} дней.`
+    );
+  }
+
+  if (
+    !validTime(startTime) ||
+    !validTime(endTime) ||
+    startTime >= endTime
+  ) {
+    throw fail(
+      400,
+      "Укажите начало и конец в формате ЧЧ:ММ. " +
+      "Конец должен быть позже начала в тот же день."
+    );
+  }
+
+  if (!["delivery", "pickup"].includes(fulfillment)) {
+    throw fail(
+      400,
+      "Выберите доставку или самовывоз для интервала."
+    );
+  }
+
+  if (typeof enabled !== "boolean") {
+    throw fail(400, "Некорректное состояние интервала.");
+  }
+
+  /*
+   * Для Europe/Moscow используется UTC+3.
+   * Клиент не передаёт свой часовой пояс.
+   */
+  const startsAt = Date.parse(
+    `${date}T${startTime}:00+03:00`
+  );
+
+  if (
+    enabled &&
+    (!Number.isFinite(startsAt) || startsAt <= Date.now())
+  ) {
+    throw fail(
+      400,
+      "Нельзя открыть уже начавшийся или прошедший интервал."
+    );
+  }
+
+  return {
+    date,
+    startTime,
+    endTime,
+    fulfillment,
+    enabled
+  };
+}
+
+async function listSlots(url, admin) {
+  const today = storeToday();
+
+  const defaultFrom = admin
+    ? addDays(today, -7)
+    : today;
+
+  const lastDate =
+    addDays(today, SCHEDULE_DAYS_AHEAD);
+
+  const from =
+    url.searchParams.get("from") || defaultFrom;
+
+  const to =
+    url.searchParams.get("to") || lastDate;
+
+  const fulfillment =
+    url.searchParams.get("fulfillment") || "";
+
+  if (
+    !validDate(from) ||
+    !validDate(to) ||
+    from > to
+  ) {
+    throw fail(400, "Некорректный диапазон дат.");
+  }
+
+  if (
+    from < defaultFrom ||
+    to > lastDate
+  ) {
+    throw fail(
+      400,
+      "Диапазон дат выходит за пределы доступного расписания."
+    );
+  }
+
+  if (
+    fulfillment &&
+    !["delivery", "pickup"].includes(fulfillment)
+  ) {
+    throw fail(400, "Некорректный способ получения.");
+  }
+
+  const result = await pool.query(
+    `SELECT
+       *,
+       to_char(slot_date, 'YYYY-MM-DD') AS date_text,
+       to_char(start_time, 'HH24:MI') AS start_text,
+       to_char(end_time, 'HH24:MI') AS end_text
+     FROM lv_receiving_slots
+     WHERE slot_date >= $1::date
+       AND slot_date <= $2::date
+       AND ($3::text = '' OR fulfillment = $3)
+       AND (
+         $4::boolean
+         OR (
+           enabled = TRUE
+           AND (
+             (slot_date + start_time)
+             AT TIME ZONE 'Europe/Moscow'
+           ) > NOW()
+         )
+       )
+     ORDER BY slot_date, start_time, fulfillment, id`,
+    [from, to, fulfillment, admin]
+  );
+
+  return result.rows.map(slotView);
+}
+
+async function createSlot(data) {
+  const slot = normalizeSlot(data);
+  const id = `slot-${crypto.randomUUID()}`;
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO lv_receiving_slots (
+         id, slot_date, start_time, end_time,
+         fulfillment, enabled
+       )
+       VALUES (
+         $1, $2::date, $3::time, $4::time, $5, $6
+       )
+       RETURNING
+         *,
+         to_char(slot_date, 'YYYY-MM-DD') AS date_text,
+         to_char(start_time, 'HH24:MI') AS start_text,
+         to_char(end_time, 'HH24:MI') AS end_text`,
+      [
+        id,
+        slot.date,
+        slot.startTime,
+        slot.endTime,
+        slot.fulfillment,
+        slot.enabled
+      ]
+    );
+
+    return slotView(result.rows[0]);
+  } catch (error) {
+    if (error.code === "23505") {
+      throw fail(
+        409,
+        "Такой интервал уже существует. " +
+        "Отредактируйте существующий."
+      );
+    }
+
+    throw error;
+  }
+}
+
+async function updateSlot(id, data) {
+  const slot = normalizeSlot(data);
+
+  try {
+    const result = await pool.query(
+      `UPDATE lv_receiving_slots
+       SET
+         slot_date = $2::date,
+         start_time = $3::time,
+         end_time = $4::time,
+         fulfillment = $5,
+         enabled = $6,
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING
+         *,
+         to_char(slot_date, 'YYYY-MM-DD') AS date_text,
+         to_char(start_time, 'HH24:MI') AS start_text,
+         to_char(end_time, 'HH24:MI') AS end_text`,
+      [
+        id,
+        slot.date,
+        slot.startTime,
+        slot.endTime,
+        slot.fulfillment,
+        slot.enabled
+      ]
+    );
+
+    if (!result.rows.length) {
+      throw fail(404, "Интервал не найден.");
+    }
+
+    return slotView(result.rows[0]);
+  } catch (error) {
+    if (error.code === "23505") {
+      throw fail(409, "Такой интервал уже существует.");
+    }
+
+    throw error;
+  }
+}
+
+async function setSlotEnabled(id, data) {
+  if (typeof data.enabled !== "boolean") {
+    throw fail(400, "Укажите enabled: true или false.");
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    const found = await client.query(
+      `SELECT
+         *,
+         to_char(slot_date, 'YYYY-MM-DD') AS date_text,
+         to_char(start_time, 'HH24:MI') AS start_text,
+         to_char(end_time, 'HH24:MI') AS end_text,
+         (
+           (slot_date + start_time)
+           AT TIME ZONE 'Europe/Moscow'
+         ) > clock_timestamp() AS future
+       FROM lv_receiving_slots
+       WHERE id = $1
+       FOR UPDATE`,
+      [id]
+    );
+
+    const row = found.rows[0];
+
+    if (!row) {
+      throw fail(404, "Интервал не найден.");
+    }
+
+    if (data.enabled) {
+      const today = storeToday();
+
+      if (
+        !row.future ||
+        row.date_text < today ||
+        row.date_text >
+          addDays(today, SCHEDULE_DAYS_AHEAD)
+      ) {
+        throw fail(
+          400,
+          "Нельзя открыть прошедший интервал " +
+          "или интервал вне доступного периода."
+        );
+      }
+    }
+
+    const updated = await client.query(
+      `UPDATE lv_receiving_slots
+       SET enabled = $2, updated_at = NOW()
+       WHERE id = $1
+       RETURNING
+         *,
+         to_char(slot_date, 'YYYY-MM-DD') AS date_text,
+         to_char(start_time, 'HH24:MI') AS start_text,
+         to_char(end_time, 'HH24:MI') AS end_text`,
+      [id, data.enabled]
+    );
+
+    await client.query("COMMIT");
+
+    return slotView(updated.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function normalizeReceivingSlotId(data) {
+  if (
+    !Object.prototype.hasOwnProperty.call(
+      data,
+      "receivingSlotId"
+    )
+  ) {
+    // Совместимость с прежним приложением.
+    return "";
+  }
+
+  if (
+    typeof data.receivingSlotId !== "string" ||
+    !SLOT_ID_PATTERN.test(data.receivingSlotId)
+  ) {
+    throw fail(
+      400,
+      "Выберите доступную дату и время получения."
+    );
+  }
+
+  return data.receivingSlotId;
+}
+
+async function receivingSlotForOrder(client, order) {
+  if (!order.receivingSlotId) {
+    return null;
+  }
+
+  /*
+   * Блокировка удерживается до сохранения заказа.
+   * Одновременное закрытие или изменение интервала
+   * не сможет незаметно изменить его в этой транзакции.
+   */
+  const result = await client.query(
+    `SELECT
+       *,
+       to_char(slot_date, 'YYYY-MM-DD') AS date_text,
+       to_char(start_time, 'HH24:MI') AS start_text,
+       to_char(end_time, 'HH24:MI') AS end_text
+     FROM lv_receiving_slots
+     WHERE id = $1
+     FOR SHARE`,
+    [order.receivingSlotId]
+  );
+
+  const row = result.rows[0];
+
+  if (
+    !row ||
+    !row.enabled ||
+    row.fulfillment !== order.fulfillment
+  ) {
+    throw fail(
+      400,
+      "Выбранный интервал больше недоступен. " +
+      "Обновите расписание и выберите другой."
+    );
+  }
+
+  const today = storeToday();
+
+  const startsAt = Date.parse(
+    `${row.date_text}T${row.start_text}:00+03:00`
+  );
+
+  if (
+    row.date_text < today ||
+    row.date_text >
+      addDays(today, SCHEDULE_DAYS_AHEAD) ||
+    !Number.isFinite(startsAt) ||
+    startsAt <= Date.now()
+  ) {
+    throw fail(
+      400,
+      "Выбранное время уже наступило " +
+      "или находится вне доступного периода. " +
+      "Выберите другой интервал."
+    );
+  }
+
+  const view = slotView(row);
+
+  /*
+   * Сохраняем снимок. Последующее редактирование
+   * расписания не изменяет дату старого заказа.
+   */
+  return {
+    id: view.id,
+    date: view.date,
+    startTime: view.startTime,
+    endTime: view.endTime,
+    fulfillment: view.fulfillment,
+    timeZone: view.timeZone,
+    label: view.label
   };
 }
 
@@ -557,6 +1087,7 @@ function orderView(row) {
     fulfillment: row.fulfillment,
     deliveryCity: row.delivery_city || "",
     deliveryInfo: storedDeliveryInfo(row),
+    receivingSlot: storedReceivingSlot(row),
     address: row.address,
     comment: row.comment,
     items: row.items,
@@ -575,6 +1106,7 @@ function customerOrderView(row) {
     fulfillment: row.fulfillment,
     deliveryCity: row.delivery_city || "",
     deliveryInfo: storedDeliveryInfo(row),
+    receivingSlot: storedReceivingSlot(row),
     pickupAddress:
       row.fulfillment === "pickup" ? PICKUP : "",
     items: row.items,
@@ -704,6 +1236,11 @@ async function initializeDatabase() {
     `);
 
     await client.query(`
+      ALTER TABLE lv_orders
+      ADD COLUMN IF NOT EXISTS receiving_slot JSONB
+    `);
+
+    await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS lv_orders_number_idx
       ON lv_orders (order_number)
     `);
@@ -711,6 +1248,38 @@ async function initializeDatabase() {
     await client.query(`
       CREATE INDEX IF NOT EXISTS lv_orders_created_idx
       ON lv_orders (created_at DESC)
+    `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS lv_receiving_slots (
+        id TEXT PRIMARY KEY,
+        slot_date DATE NOT NULL,
+        start_time TIME(0) NOT NULL,
+        end_time TIME(0) NOT NULL,
+        fulfillment TEXT NOT NULL
+          CHECK (fulfillment IN ('delivery', 'pickup')),
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT lv_receiving_slots_time_check
+          CHECK (end_time > start_time)
+      )
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS
+        lv_receiving_slots_unique_idx
+      ON lv_receiving_slots (
+        slot_date, start_time, end_time, fulfillment
+      )
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS
+        lv_receiving_slots_date_idx
+      ON lv_receiving_slots (
+        slot_date, fulfillment, start_time
+      )
     `);
 
     const seeds = [
@@ -729,6 +1298,9 @@ async function initializeDatabase() {
       );
     }
 
+    // Интервалы автоматически не создаём:
+    // реальные дни и часы назначает продавец.
+
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
@@ -742,6 +1314,7 @@ async function initializeDatabase() {
 
 function normalizeProduct(data, id) {
   const name = text(data.name, 120);
+
   const category =
     text(data.category, 80) || "Рыба и морепродукты";
 
@@ -898,9 +1471,16 @@ async function createProduct(data) {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
       RETURNING *`,
       [
-        p.id, p.name, p.category, p.description,
-        p.priceRub, p.oldPriceRub, p.unit,
-        p.imageUrl, p.available, p.sortOrder
+        p.id,
+        p.name,
+        p.category,
+        p.description,
+        p.priceRub,
+        p.oldPriceRub,
+        p.unit,
+        p.imageUrl,
+        p.available,
+        p.sortOrder
       ]
     );
 
@@ -939,9 +1519,17 @@ async function updateProduct(id, data) {
        WHERE id = $1
        RETURNING *`,
       [
-        p.id, p.name, p.category, p.description,
-        p.priceRub, p.oldPriceProvided, p.oldPriceRub,
-        p.unit, p.imageUrl, p.available, p.sortOrder
+        p.id,
+        p.name,
+        p.category,
+        p.description,
+        p.priceRub,
+        p.oldPriceProvided,
+        p.oldPriceRub,
+        p.unit,
+        p.imageUrl,
+        p.available,
+        p.sortOrder
       ]
     );
 
@@ -977,10 +1565,14 @@ function accessTokenHashFromInput(data) {
 }
 
 function normalizeOrder(data) {
-  const requestId = text(data.requestId, 80).toLowerCase();
+  const requestId =
+    text(data.requestId, 80).toLowerCase();
 
   if (!UUID_PATTERN.test(requestId)) {
-    throw fail(400, "Некорректный идентификатор заказа.");
+    throw fail(
+      400,
+      "Некорректный идентификатор заказа."
+    );
   }
 
   const name = text(data.name, 80);
@@ -1006,12 +1598,18 @@ function normalizeOrder(data) {
     throw fail(400, "Выберите доставку или самовывоз.");
   }
 
-  if (fulfillment === "delivery" && address.length < 5) {
+  if (
+    fulfillment === "delivery" &&
+    address.length < 5
+  ) {
     throw fail(400, "Укажите полный адрес доставки.");
   }
 
   const deliveryCity =
     normalizeDeliveryCity(data, fulfillment);
+
+  const receivingSlotId =
+    normalizeReceivingSlotId(data);
 
   if (
     !Array.isArray(data.items) ||
@@ -1052,7 +1650,11 @@ function normalizeOrder(data) {
     }
 
     seen.add(productId);
-    return { productId, quantity };
+
+    return {
+      productId,
+      quantity
+    };
   });
 
   items.sort((a, b) =>
@@ -1060,10 +1662,8 @@ function normalizeOrder(data) {
   );
 
   /*
-   * Сохраняем прежний порядок и набор полей для
-   * заказов старого приложения без deliveryCity.
-   * Это позволяет проверять прежние pending_order
-   * без изменения их fingerprint.
+   * Не меняем порядок прежних полей.
+   * Это сохраняет fingerprint старых pending_order.
    */
   const order = {
     requestId,
@@ -1075,9 +1675,12 @@ function normalizeOrder(data) {
     items
   };
 
-  // Город входит в fingerprint новых заказов.
   if (deliveryCity) {
     order.deliveryCity = deliveryCity;
+  }
+
+  if (receivingSlotId) {
+    order.receivingSlotId = receivingSlotId;
   }
 
   return order;
@@ -1129,9 +1732,14 @@ async function saveOrder(order, trackingTokenHash) {
 
       await client.query("COMMIT");
 
-      // Возвращаем сохранённые цены и условия,
-      // не пересчитывая уже оформленный заказ.
-      return { row, created: false };
+      /*
+       * Повторная проверка возвращает старый заказ,
+       * даже если его интервал уже прошёл или закрыт.
+       */
+      return {
+        row,
+        created: false
+      };
     }
 
     const found = await client.query(
@@ -1143,7 +1751,10 @@ async function saveOrder(order, trackingTokenHash) {
     );
 
     const products = new Map(
-      found.rows.map((product) => [product.id, product])
+      found.rows.map((product) => [
+        product.id,
+        product
+      ])
     );
 
     let totalKopecks = 0;
@@ -1169,8 +1780,11 @@ async function saveOrder(order, trackingTokenHash) {
         );
       }
 
-      const priceKopecks = Number(product.price_rub) * 100;
-      const lineKopecks = priceKopecks * item.quantity;
+      const priceKopecks =
+        Number(product.price_rub) * 100;
+
+      const lineKopecks =
+        priceKopecks * item.quantity;
 
       if (
         !Number.isSafeInteger(lineKopecks) ||
@@ -1201,14 +1815,18 @@ async function saveOrder(order, trackingTokenHash) {
 
     const deliveryCity = order.deliveryCity || "";
 
-    // Условия считаются по серверной сумме.
-    // Переданные клиентом freeDelivery, totalRub
-    // и стоимость доставки не используются.
     const deliveryInfo = calculateDeliveryInfo(
       order.fulfillment,
       deliveryCity,
       totalKopecks
     );
+
+    /*
+     * Проверяем интервал только для нового заказа.
+     * Клиент передаёт лишь ID, даты и часы берём из БД.
+     */
+    const receivingSlot =
+      await receivingSlotForOrder(client, order);
 
     const id = `LV-${crypto.randomUUID()}`;
 
@@ -1217,11 +1835,13 @@ async function saveOrder(order, trackingTokenHash) {
         id, request_id, fingerprint,
         customer_name, phone, fulfillment,
         address, comment, items, total_rub,
-        tracking_token_hash, delivery_city, delivery_terms
+        tracking_token_hash,
+        delivery_city, delivery_terms,
+        receiving_slot
       )
       VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,
-        $9::jsonb,$10,$11,$12,$13::jsonb
+        $9::jsonb,$10,$11,$12,$13::jsonb,$14::jsonb
       )
       RETURNING *`,
       [
@@ -1237,7 +1857,10 @@ async function saveOrder(order, trackingTokenHash) {
         (totalKopecks / 100).toFixed(2),
         trackingTokenHash,
         deliveryCity,
-        JSON.stringify(deliveryInfo)
+        JSON.stringify(deliveryInfo),
+        receivingSlot
+          ? JSON.stringify(receivingSlot)
+          : null
       ]
     );
 
@@ -1262,7 +1885,8 @@ async function notifyTelegram(row) {
 
   if (BOT_TOKEN && CHAT_ID) {
     const itemLines = row.items.map((item) => {
-      const quantity = String(item.quantity).replace(".", ",");
+      const quantity =
+        String(item.quantity).replace(".", ",");
 
       return (
         `${item.name}: ${quantity} ${item.unit} × ` +
@@ -1271,6 +1895,7 @@ async function notifyTelegram(row) {
     });
 
     const deliveryInfo = storedDeliveryInfo(row);
+    const receivingSlot = storedReceivingSlot(row);
 
     const receivingLines =
       row.fulfillment === "pickup"
@@ -1284,6 +1909,18 @@ async function notifyTelegram(row) {
             `Адрес: ${row.address}`
           ];
 
+    const timeLines = receivingSlot
+      ? [
+          `Дата и время: ${receivingSlot.label}`,
+          "Время местное: UTC+3.",
+          "Интервал выбран покупателем; " +
+          "подтвердите возможность выполнения."
+        ]
+      : [
+          "Дата и время: не выбраны в приложении, " +
+          "согласуйте с покупателем."
+        ];
+
     const message = [
       "НОВЫЙ ЗАКАЗ — ЛАВКА ВКУСА",
       `Заказ № ${row.order_number}`,
@@ -1291,13 +1928,16 @@ async function notifyTelegram(row) {
       `Покупатель: ${row.customer_name}`,
       `Телефон: ${row.phone}`,
       ...receivingLines,
+      ...timeLines,
       "",
       ...itemLines,
       "",
       `Товары: ${rub(row.total_rub)}`,
       deliveryInfo.message,
       "Оплата при получении.",
-      row.comment ? `Комментарий: ${row.comment}` : ""
+      row.comment
+        ? `Комментарий: ${row.comment}`
+        : ""
     ].join("\n");
 
     try {
@@ -1320,7 +1960,9 @@ async function notifyTelegram(row) {
         const result = await response.json();
 
         if (!response.ok || !result.ok) {
-          throw new Error("Telegram did not confirm delivery");
+          throw new Error(
+            "Telegram did not confirm delivery"
+          );
         }
       }
 
@@ -1377,7 +2019,8 @@ async function lookupCustomerOrder(data) {
     `SELECT
        id, order_number, created_at, updated_at,
        fulfillment, items, total_rub, status,
-       tracking_token_hash, delivery_city, delivery_terms
+       tracking_token_hash,
+       delivery_city, delivery_terms, receiving_slot
      FROM lv_orders
      WHERE id = $1`,
     [id]
@@ -1395,7 +2038,11 @@ async function lookupCustomerOrder(data) {
     expectedHash
   );
 
-  if (!row || !row.tracking_token_hash || !matches) {
+  if (
+    !row ||
+    !row.tracking_token_hash ||
+    !matches
+  ) {
     throw unavailable();
   }
 
@@ -1409,9 +2056,8 @@ function decodeImage(data) {
   const base64 = data.base64;
 
   if (
-    !["image/jpeg", "image/png", "image/webp"].includes(
-      mimeType
-    )
+    !["image/jpeg", "image/png", "image/webp"]
+      .includes(mimeType)
   ) {
     throw fail(400, "Поддерживаются JPG, PNG и WEBP.");
   }
@@ -1419,7 +2065,8 @@ function decodeImage(data) {
   if (
     typeof base64 !== "string" ||
     base64.length < 4 ||
-    base64.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 ||
+    base64.length >
+      Math.ceil(MAX_IMAGE_BYTES / 3) * 4 ||
     base64.length % 4 !== 0 ||
     !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)
   ) {
@@ -1463,16 +2110,23 @@ function decodeImage(data) {
   if (!matches) {
     throw fail(
       400,
-      "Содержимое файла не соответствует формату фотографии."
+      "Содержимое файла не соответствует " +
+      "формату фотографии."
     );
   }
 
-  return { buffer, mimeType };
+  return {
+    buffer,
+    mimeType
+  };
 }
 
 async function uploadImageToCloudinary(image) {
   if (!cloudinaryConfigured()) {
-    throw fail(503, "Хранилище фотографий не настроено.");
+    throw fail(
+      503,
+      "Хранилище фотографий не настроено."
+    );
   }
 
   const extension = {
@@ -1485,7 +2139,8 @@ async function uploadImageToCloudinary(image) {
     folder: "lavka-vkusa/products",
     public_id: crypto.randomUUID(),
     timestamp: String(Math.floor(Date.now() / 1000)),
-    transformation: "c_limit,w_1200,h_1200/q_auto:good/f_jpg"
+    transformation:
+      "c_limit,w_1200,h_1200/q_auto:good/f_jpg"
   };
 
   const signatureSource = Object.keys(parameters)
@@ -1509,7 +2164,10 @@ async function uploadImageToCloudinary(image) {
 
   form.append(
     "file",
-    new Blob([image.buffer], { type: image.mimeType }),
+    new Blob(
+      [image.buffer],
+      { type: image.mimeType }
+    ),
     `product.${extension}`
   );
 
@@ -1544,7 +2202,8 @@ async function uploadImageToCloudinary(image) {
       throw fail(
         502,
         "Cloudinary отклонил доступ. " +
-        "Проверьте Cloud name, API Key и API Secret в Render."
+        "Проверьте Cloud name, API Key " +
+        "и API Secret в Render."
       );
     }
 
@@ -1597,7 +2256,11 @@ async function uploadImageToCloudinary(image) {
 async function handle(req, res) {
   limitWrites(req);
 
-  const url = new URL(req.url, "http://localhost");
+  const url = new URL(
+    req.url,
+    "http://localhost"
+  );
+
   const pathname = url.pathname;
 
   if (
@@ -1617,7 +2280,9 @@ async function handle(req, res) {
       quantityStepsEnabled: true,
       orderTrackingEnabled: true,
       promotionsEnabled: true,
-      deliveryCitiesEnabled: true
+      deliveryCitiesEnabled: true,
+      schedulingEnabled: true,
+      scheduleTimeZone: STORE_TIME_ZONE
     });
   }
 
@@ -1628,6 +2293,19 @@ async function handle(req, res) {
     return json(res, 200, {
       ok: true,
       deliveryOptions: deliveryOptions()
+    });
+  }
+
+  if (
+    req.method === "GET" &&
+    pathname === "/api/receiving-slots"
+  ) {
+    const slots = await listSlots(url, false);
+
+    return json(res, 200, {
+      ok: true,
+      slots,
+      scheduleOptions: scheduleOptions()
     });
   }
 
@@ -1644,7 +2322,8 @@ async function handle(req, res) {
     return json(res, 200, {
       products: result.rows.map(productView),
       promotionsEnabled: true,
-      deliveryOptions: deliveryOptions()
+      deliveryOptions: deliveryOptions(),
+      scheduleOptions: scheduleOptions()
     });
   }
 
@@ -1660,7 +2339,8 @@ async function handle(req, res) {
     );
 
     return json(res, 200, {
-      categories: result.rows.map((row) => row.category)
+      categories:
+        result.rows.map((row) => row.category)
     });
   }
 
@@ -1682,34 +2362,51 @@ async function handle(req, res) {
     pathname === "/api/orders"
   ) {
     const data = await readJson(req);
-    const trackingTokenHash = accessTokenHashFromInput(data);
-    const order = normalizeOrder(data);
-    const saved = await saveOrder(order, trackingTokenHash);
 
-    let telegramStatus = saved.row.telegram_status;
+    const trackingTokenHash =
+      accessTokenHashFromInput(data);
+
+    const order = normalizeOrder(data);
+
+    const saved = await saveOrder(
+      order,
+      trackingTokenHash
+    );
+
+    let telegramStatus =
+      saved.row.telegram_status;
 
     if (saved.created) {
-      telegramStatus = await notifyTelegram(saved.row);
+      telegramStatus =
+        await notifyTelegram(saved.row);
     }
 
-    return json(res, saved.created ? 201 : 200, {
-      ok: true,
-      id: saved.row.id,
-      orderNumber: Number(saved.row.order_number),
-      totalRub: Number(saved.row.total_rub),
-      status: saved.row.status,
-      telegramStatus,
-      deliveryCity: saved.row.delivery_city || "",
-      deliveryInfo: storedDeliveryInfo(saved.row),
-      orderTrackingAvailable: Boolean(
-        trackingTokenHash &&
-        sameHash(
-          saved.row.tracking_token_hash,
-          trackingTokenHash
-        )
-      ),
-      message: "Заказ сохранён в магазине."
-    });
+    return json(
+      res,
+      saved.created ? 201 : 200,
+      {
+        ok: true,
+        id: saved.row.id,
+        orderNumber: Number(saved.row.order_number),
+        totalRub: Number(saved.row.total_rub),
+        status: saved.row.status,
+        telegramStatus,
+        deliveryCity:
+          saved.row.delivery_city || "",
+        deliveryInfo:
+          storedDeliveryInfo(saved.row),
+        receivingSlot:
+          storedReceivingSlot(saved.row),
+        orderTrackingAvailable: Boolean(
+          trackingTokenHash &&
+          sameHash(
+            saved.row.tracking_token_hash,
+            trackingTokenHash
+          )
+        ),
+        message: "Заказ сохранён в магазине."
+      }
+    );
   }
 
   if (
@@ -1751,7 +2448,8 @@ async function handle(req, res) {
       pathname === "/api/admin/config"
     ) {
       return json(res, 200, {
-        imageUploadConfigured: cloudinaryConfigured(),
+        imageUploadConfigured:
+          cloudinaryConfigured(),
         maxImageBytes: MAX_IMAGE_BYTES,
         allowedImageTypes: [
           "image/jpeg",
@@ -1763,7 +2461,64 @@ async function handle(req, res) {
         promotionsEnabled: true,
         oldPriceField: "oldPriceRub",
         deliveryCitiesEnabled: true,
-        deliveryOptions: deliveryOptions()
+        deliveryOptions: deliveryOptions(),
+        schedulingEnabled: true,
+        scheduleOptions: scheduleOptions()
+      });
+    }
+
+    if (
+      req.method === "GET" &&
+      pathname === "/api/admin/receiving-slots"
+    ) {
+      const slots = await listSlots(url, true);
+
+      return json(res, 200, {
+        ok: true,
+        slots,
+        scheduleOptions: scheduleOptions()
+      });
+    }
+
+    if (
+      req.method === "POST" &&
+      pathname === "/api/admin/receiving-slots"
+    ) {
+      const data = await readJson(req, 4096);
+      const slot = await createSlot(data);
+
+      return json(res, 201, {
+        ok: true,
+        slot
+      });
+    }
+
+    const slotMatch = pathname.match(
+      /^\/api\/admin\/receiving-slots\/(slot-[0-9a-f-]{36})$/
+    );
+
+    if (
+      slotMatch &&
+      ["PUT", "PATCH"].includes(req.method)
+    ) {
+      const id = slotMatch[1];
+
+      if (!SLOT_ID_PATTERN.test(id)) {
+        throw fail(
+          400,
+          "Некорректный идентификатор интервала."
+        );
+      }
+
+      const data = await readJson(req, 4096);
+
+      const slot = req.method === "PUT"
+        ? await updateSlot(id, data)
+        : await setSlotEnabled(id, data);
+
+      return json(res, 200, {
+        ok: true,
+        slot
       });
     }
 
@@ -1788,7 +2543,9 @@ async function handle(req, res) {
         );
 
         const image = decodeImage(data);
-        const uploaded = await uploadImageToCloudinary(image);
+
+        const uploaded =
+          await uploadImageToCloudinary(image);
 
         return json(res, 201, {
           ok: true,
@@ -1834,8 +2591,12 @@ async function handle(req, res) {
       /^\/api\/admin\/products\/([a-z0-9_-]{1,80})$/
     );
 
-    if (req.method === "PUT" && productMatch) {
+    if (
+      req.method === "PUT" &&
+      productMatch
+    ) {
       const data = await readJson(req);
+
       const product = await updateProduct(
         productMatch[1],
         data
@@ -1851,10 +2612,14 @@ async function handle(req, res) {
       req.method === "GET" &&
       pathname === "/api/admin/orders"
     ) {
-      const rawPage = url.searchParams.get("page") || "1";
+      const rawPage =
+        url.searchParams.get("page") || "1";
 
       if (!/^[1-9]\d{0,5}$/.test(rawPage)) {
-        throw fail(400, "Некорректный номер страницы.");
+        throw fail(
+          400,
+          "Некорректный номер страницы."
+        );
       }
 
       const page = Number(rawPage);
@@ -1878,17 +2643,26 @@ async function handle(req, res) {
       /^\/api\/admin\/orders\/(LV-[0-9a-f-]{36})\/status$/
     );
 
-    if (req.method === "PATCH" && statusMatch) {
+    if (
+      req.method === "PATCH" &&
+      statusMatch
+    ) {
       const id = statusMatch[1];
 
       if (!ORDER_ID_PATTERN.test(id)) {
-        throw fail(400, "Некорректный номер заказа.");
+        throw fail(
+          400,
+          "Некорректный номер заказа."
+        );
       }
 
       const data = await readJson(req, 4096);
 
       if (!ORDER_STATUSES.includes(data.status)) {
-        throw fail(400, "Некорректный статус заказа.");
+        throw fail(
+          400,
+          "Некорректный статус заказа."
+        );
       }
 
       const result = await pool.query(
@@ -1937,7 +2711,10 @@ const server = http.createServer((req, res) => {
           ? error.code
           : "UNKNOWN";
 
-      console.error("Ошибка обработки запроса. Код:", code);
+      console.error(
+        "Ошибка обработки запроса. Код:",
+        code
+      );
     }
 
     json(res, status, {
@@ -1961,6 +2738,7 @@ server.on("error", (error) => {
     "Ошибка HTTP-сервера:",
     error.code || "UNKNOWN"
   );
+
   process.exit(1);
 });
 
@@ -1972,7 +2750,10 @@ async function start() {
       console.log(
         `Лавка Вкуса: сервер запущен на порту ${PORT}`
       );
-      console.log("Акции и выбор города доставки включены.");
+
+      console.log(
+        "Акции, города и интервалы получения включены."
+      );
     });
   } catch (error) {
     console.error(
