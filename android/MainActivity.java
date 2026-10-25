@@ -1,8 +1,6 @@
 package ru.makeevka.fishshop;
 
 import android.app.AlertDialog;
-import android.app.KeyguardManager;
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -29,9 +27,6 @@ public class MainActivity extends StoreActivity {
 
     private static final String ENABLED_KEY =
             "enabled";
-
-    private static final long LOCK_AFTER_MS =
-            30000L;
 
     private static final int BLACK =
             Color.rgb(14, 15, 17);
@@ -63,6 +58,8 @@ public class MainActivity extends StoreActivity {
     private Button skipButton;
     private Button disableButton;
 
+    private AlertDialog disableDialog;
+
     private boolean protectionEnabled;
     private boolean unlocked;
     private boolean resumed;
@@ -74,10 +71,6 @@ public class MainActivity extends StoreActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        /*
-         * Закрываем содержимое от снимков экрана
-         * до создания магазина и экрана входа.
-         */
         getWindow().addFlags(
                 WindowManager.LayoutParams.FLAG_SECURE
         );
@@ -96,10 +89,6 @@ public class MainActivity extends StoreActivity {
 
         deviceLogin = new DeviceLogin(this);
 
-        /*
-         * Разблокировку не сохраняем в Bundle:
-         * после пересоздания Activity проверяем вход заново.
-         */
         unlocked = false;
         autoPrompt = protectionEnabled;
 
@@ -107,14 +96,73 @@ public class MainActivity extends StoreActivity {
 
         createGate();
         showGate();
-
-        /*
-         * Подписки и запрос разрешения на уведомления
-         * запускаются только после открытия магазина.
-         */
     }
 
-    // -------------------- ЭКРАН ВХОДА --------------------
+    // ==================== НАСТРОЙКИ ====================
+
+    public void openShopSettings() {
+        if (!unlocked || !resumed || closing) {
+            return;
+        }
+
+        ShopSettings.show(
+                this,
+                new ShopSettings.Actions() {
+
+                    @Override
+                    public void enableProtection() {
+                        if (!unlocked || closing) {
+                            return;
+                        }
+
+                        protectionEnabled =
+                                lockPrefs.getBoolean(
+                                        ENABLED_KEY,
+                                        false
+                                );
+
+                        if (protectionEnabled) {
+                            return;
+                        }
+
+                        unlocked = false;
+                        showGate();
+                        authenticate(false, false);
+                    }
+
+                    @Override
+                    public void disableProtection() {
+                        if (!unlocked || closing) {
+                            return;
+                        }
+
+                        confirmDisable();
+                    }
+
+                    @Override
+                    public void editCustomerData() {
+                        if (!unlocked || closing) {
+                            return;
+                        }
+
+                        /*
+                         * Настройки открываются из профиля.
+                         * Существующая форма данных остаётся
+                         * на том же экране под кнопкой настроек.
+                         */
+                        Toast.makeText(
+                                MainActivity.this,
+                                "Измените данные в разделе " +
+                                "«Данные покупателя» ниже " +
+                                "и нажмите «Сохранить данные».",
+                                Toast.LENGTH_LONG
+                        ).show();
+                    }
+                }
+        );
+    }
+
+    // ==================== ЭКРАН ВХОДА ====================
 
     private void createGate() {
         FrameLayout host = findViewById(
@@ -133,7 +181,6 @@ public class MainActivity extends StoreActivity {
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setGravity(Gravity.CENTER);
-
         body.setPadding(
                 dp(28), dp(32),
                 dp(28), dp(32)
@@ -141,19 +188,13 @@ public class MainActivity extends StoreActivity {
 
         TextView logo = label("ЛВ", 46, GOLD);
         logo.setTypeface(
-                Typeface.create(
-                        "serif",
-                        Typeface.BOLD
-                )
+                Typeface.create("serif", Typeface.BOLD)
         );
 
-        GradientDrawable circle =
-                new GradientDrawable();
-
+        GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
         circle.setColor(CARD);
         circle.setStroke(dp(1), GOLD);
-
         logo.setBackground(circle);
 
         LinearLayout.LayoutParams logoParams =
@@ -161,18 +202,10 @@ public class MainActivity extends StoreActivity {
                         dp(120), dp(120)
                 );
 
-        logoParams.setMargins(
-                0, 0, 0, dp(22)
-        );
-
+        logoParams.setMargins(0, 0, 0, dp(22));
         body.addView(logo, logoParams);
 
-        gateTitle = label(
-                "Лавка Вкуса",
-                25,
-                WHITE
-        );
-
+        gateTitle = label("Лавка Вкуса", 25, WHITE);
         body.addView(gateTitle);
 
         gateHint = label("", 14, MUTED);
@@ -182,7 +215,6 @@ public class MainActivity extends StoreActivity {
         gateMessage.setAccessibilityLiveRegion(
                 View.ACCESSIBILITY_LIVE_REGION_POLITE
         );
-
         body.addView(gateMessage);
 
         enterButton = actionButton(
@@ -190,7 +222,6 @@ public class MainActivity extends StoreActivity {
                 () -> authenticate(false, false),
                 false
         );
-
         body.addView(enterButton);
 
         codeButton = actionButton(
@@ -198,7 +229,6 @@ public class MainActivity extends StoreActivity {
                 () -> authenticate(true, false),
                 true
         );
-
         body.addView(codeButton);
 
         settingsButton = actionButton(
@@ -206,7 +236,6 @@ public class MainActivity extends StoreActivity {
                 this::openSecuritySettings,
                 true
         );
-
         body.addView(settingsButton);
 
         skipButton = actionButton(
@@ -214,7 +243,6 @@ public class MainActivity extends StoreActivity {
                 this::continueWithoutProtection,
                 true
         );
-
         body.addView(skipButton);
 
         disableButton = actionButton(
@@ -222,17 +250,14 @@ public class MainActivity extends StoreActivity {
                 this::confirmDisable,
                 true
         );
-
         body.addView(disableButton);
 
-        TextView privacy = label(
+        body.addView(label(
                 "Отпечатки, изображение лица и код " +
                 "телефона не передаются магазину.",
                 12,
                 MUTED
-        );
-
-        body.addView(privacy);
+        ));
 
         scroll.addView(
                 body,
@@ -285,21 +310,15 @@ public class MainActivity extends StoreActivity {
         );
 
         codeButton.setVisibility(
-                protectionEnabled
-                        ? View.VISIBLE
-                        : View.GONE
+                protectionEnabled ? View.VISIBLE : View.GONE
         );
 
         skipButton.setVisibility(
-                protectionEnabled
-                        ? View.GONE
-                        : View.VISIBLE
+                protectionEnabled ? View.GONE : View.VISIBLE
         );
 
         disableButton.setVisibility(
-                protectionEnabled
-                        ? View.VISIBLE
-                        : View.GONE
+                protectionEnabled ? View.VISIBLE : View.GONE
         );
 
         syncButtons();
@@ -310,16 +329,16 @@ public class MainActivity extends StoreActivity {
             return;
         }
 
-        boolean busy = deviceLogin.isRunning();
+        boolean available = !deviceLogin.isRunning();
 
-        enterButton.setEnabled(!busy);
-        codeButton.setEnabled(!busy);
-        settingsButton.setEnabled(!busy);
-        skipButton.setEnabled(!busy);
-        disableButton.setEnabled(!busy);
+        enterButton.setEnabled(available);
+        codeButton.setEnabled(available);
+        settingsButton.setEnabled(available);
+        skipButton.setEnabled(available);
+        disableButton.setEnabled(available);
     }
 
-    // -------------------- ПРОВЕРКА ВХОДА --------------------
+    // ==================== ПРОВЕРКА ВХОДА ====================
 
     private void authenticate(
             boolean phoneCodeOnly,
@@ -341,12 +360,12 @@ public class MainActivity extends StoreActivity {
                     "или графический ключ телефона. " +
                     "Затем можно включить защиту приложения."
             );
-
             return;
         }
 
         DeviceLogin.Callback result =
                 new DeviceLogin.Callback() {
+
                     @Override
                     public void onAuthenticated() {
                         if (closing) {
@@ -395,10 +414,7 @@ public class MainActivity extends StoreActivity {
 
     private boolean saveProtection(boolean enabled) {
         return lockPrefs.edit()
-                .putBoolean(
-                        ENABLED_KEY,
-                        enabled
-                )
+                .putBoolean(ENABLED_KEY, enabled)
                 .commit();
     }
 
@@ -431,25 +447,29 @@ public class MainActivity extends StoreActivity {
 
     private void continueWithoutProtection() {
         if (protectionEnabled ||
+                deviceLogin == null ||
                 deviceLogin.isRunning()) {
             return;
         }
 
-        /*
-         * Отказ действует для текущего открытия.
-         * При следующем новом запуске предложение
-         * включить защиту появится снова.
-         */
         unlockStore();
     }
 
     private void confirmDisable() {
         if (!protectionEnabled ||
-                deviceLogin.isRunning()) {
+                deviceLogin == null ||
+                deviceLogin.isRunning() ||
+                closing ||
+                !resumed) {
             return;
         }
 
-        new AlertDialog.Builder(this)
+        if (disableDialog != null &&
+                disableDialog.isShowing()) {
+            return;
+        }
+
+        disableDialog = new AlertDialog.Builder(this)
                 .setTitle("Отключить защиту?")
                 .setMessage(
                         "Сначала подтвердите, что вы " +
@@ -459,14 +479,24 @@ public class MainActivity extends StoreActivity {
                 .setNegativeButton("Оставить", null)
                 .setPositiveButton(
                         "Подтвердить",
-                        (dialog, which) ->
-                                authenticate(false, true)
+                        (dialog, which) -> {
+                            if (!resumed || closing) {
+                                return;
+                            }
+
+                            unlocked = false;
+                            showGate();
+                            authenticate(false, true);
+                        }
                 )
-                .show();
+                .create();
+
+        disableDialog.show();
     }
 
     private void openSecuritySettings() {
-        if (deviceLogin.isRunning()) {
+        if (deviceLogin == null ||
+                deviceLogin.isRunning()) {
             return;
         }
 
@@ -484,29 +514,34 @@ public class MainActivity extends StoreActivity {
         }
     }
 
-    // -------------------- ЖИЗНЕННЫЙ ЦИКЛ --------------------
+    // ==================== ЖИЗНЕННЫЙ ЦИКЛ ====================
 
     @Override
     protected void onResume() {
         super.onResume();
-
         resumed = true;
 
         if (deviceLogin == null || closing) {
             return;
         }
 
-        if (
-                protectionEnabled &&
+        protectionEnabled = lockPrefs.getBoolean(
+                ENABLED_KEY,
+                false
+        );
+
+        if (protectionEnabled &&
                 unlocked &&
-                backgroundAt >= 0L
-        ) {
+                backgroundAt >= 0L) {
+
             long elapsed =
                     SystemClock.elapsedRealtime() -
                     backgroundAt;
 
-            if (elapsed >= LOCK_AFTER_MS ||
-                    elapsed < 0L) {
+            long delay =
+                    ShopSettings.lockAfterMillis(this);
+
+            if (elapsed >= delay || elapsed < 0L) {
                 unlocked = false;
                 autoPrompt = true;
             }
@@ -522,17 +557,14 @@ public class MainActivity extends StoreActivity {
 
         showGate();
 
-        if (autoPrompt &&
-                !deviceLogin.isRunning()) {
+        if (autoPrompt && !deviceLogin.isRunning()) {
             autoPrompt = false;
 
             gate.post(() -> {
-                if (
-                        resumed &&
+                if (resumed &&
                         !closing &&
                         !unlocked &&
-                        protectionEnabled
-                ) {
+                        protectionEnabled) {
                     authenticate(false, false);
                 }
             });
@@ -547,21 +579,25 @@ public class MainActivity extends StoreActivity {
 
     @Override
     protected void onStop() {
-        if (
-                deviceLogin != null &&
+        /*
+         * Закрываем окна настроек при уходе в фон,
+         * чтобы они не оставались поверх экрана входа.
+         */
+        ShopSettings.dismiss();
+
+        if (disableDialog != null) {
+            disableDialog.dismiss();
+            disableDialog = null;
+        }
+
+        if (deviceLogin != null &&
                 protectionEnabled &&
-                unlocked
-        ) {
+                unlocked) {
+
             if (backgroundAt < 0L) {
-                backgroundAt =
-                        SystemClock.elapsedRealtime();
+                backgroundAt = SystemClock.elapsedRealtime();
             }
 
-            /*
-             * При уходе в фон прикрываем содержимое.
-             * Если вернуться раньше 30 секунд,
-             * экран уберётся без новой проверки.
-             */
             showGate();
         }
 
@@ -575,9 +611,7 @@ public class MainActivity extends StoreActivity {
             Intent data
     ) {
         super.onActivityResult(
-                requestCode,
-                resultCode,
-                data
+                requestCode, resultCode, data
         );
 
         if (deviceLogin != null) {
@@ -591,9 +625,6 @@ public class MainActivity extends StoreActivity {
     @Override
     public void onBackPressed() {
         if (!unlocked) {
-            /*
-             * Назад не должен обходить защиту.
-             */
             moveTaskToBack(true);
             return;
         }
@@ -601,7 +632,7 @@ public class MainActivity extends StoreActivity {
         super.onBackPressed();
     }
 
-    // -------------------- УВЕДОМЛЕНИЯ --------------------
+    // ==================== УВЕДОМЛЕНИЯ ====================
 
     private void startBuyerServices() {
         if (!resumed || !unlocked || closing) {
@@ -609,9 +640,7 @@ public class MainActivity extends StoreActivity {
         }
 
         if (orderPush == null) {
-            orderPush =
-                    new OrderPushSubscriptions(this);
-
+            orderPush = new OrderPushSubscriptions(this);
             orderPush.start();
         }
 
@@ -635,18 +664,15 @@ public class MainActivity extends StoreActivity {
                 grantResults
         );
 
-        if (
-                requestCode !=
-                PushNotifications.PERMISSION_REQUEST
-        ) {
+        if (requestCode !=
+                PushNotifications.PERMISSION_REQUEST) {
             return;
         }
 
-        if (
-                grantResults.length > 0 &&
+        if (grantResults.length > 0 &&
                 grantResults[0] ==
-                PackageManager.PERMISSION_GRANTED
-        ) {
+                        PackageManager.PERMISSION_GRANTED) {
+
             pushNeedsInitialization = true;
             startBuyerServices();
 
@@ -654,8 +680,7 @@ public class MainActivity extends StoreActivity {
             Toast.makeText(
                     this,
                     "Уведомления отключены. " +
-                    "Их можно разрешить " +
-                    "в настройках Android. " +
+                    "Их можно разрешить в настройках Android. " +
                     "Магазин продолжит работать.",
                     Toast.LENGTH_LONG
             ).show();
@@ -666,6 +691,13 @@ public class MainActivity extends StoreActivity {
     protected void onDestroy() {
         closing = true;
         resumed = false;
+
+        ShopSettings.dismiss();
+
+        if (disableDialog != null) {
+            disableDialog.dismiss();
+            disableDialog = null;
+        }
 
         if (deviceLogin != null) {
             deviceLogin.close();
@@ -680,13 +712,12 @@ public class MainActivity extends StoreActivity {
         super.onDestroy();
     }
 
-    // -------------------- ОФОРМЛЕНИЕ --------------------
+    // ==================== ОФОРМЛЕНИЕ ====================
 
     private int dp(int value) {
         return Math.round(
                 value *
-                getResources()
-                        .getDisplayMetrics().density
+                getResources().getDisplayMetrics().density
         );
     }
 
@@ -696,16 +727,11 @@ public class MainActivity extends StoreActivity {
             int color
     ) {
         TextView result = new TextView(this);
-
         result.setText(text);
         result.setTextSize(size);
         result.setTextColor(color);
         result.setGravity(Gravity.CENTER);
-
-        result.setPadding(
-                0, dp(8), 0, dp(8)
-        );
-
+        result.setPadding(0, dp(8), 0, dp(8));
         return result;
     }
 
@@ -715,14 +741,10 @@ public class MainActivity extends StoreActivity {
             boolean secondary
     ) {
         Button result = new Button(this);
-
         result.setText(text);
         result.setAllCaps(false);
         result.setTextSize(14);
-        result.setTextColor(
-                secondary ? GOLD : BLACK
-        );
-
+        result.setTextColor(secondary ? GOLD : BLACK);
         result.setMinHeight(dp(48));
         result.setMinimumHeight(dp(48));
 
@@ -734,35 +756,22 @@ public class MainActivity extends StoreActivity {
         GradientDrawable background =
                 new GradientDrawable();
 
-        background.setColor(
-                secondary ? CARD : GOLD
-        );
-
+        background.setColor(secondary ? CARD : GOLD);
         background.setCornerRadius(dp(14));
 
         if (secondary) {
-            background.setStroke(
-                    dp(1), GOLD
-            );
+            background.setStroke(dp(1), GOLD);
         }
 
         result.setBackgroundTintList(null);
         result.setBackground(background);
         result.setStateListAnimator(null);
-
-        result.setOnClickListener(
-                view -> action.run()
-        );
+        result.setOnClickListener(view -> action.run());
 
         LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(
-                        -1, -2
-                );
+                new LinearLayout.LayoutParams(-1, -2);
 
-        params.setMargins(
-                0, dp(8), 0, 0
-        );
-
+        params.setMargins(0, dp(8), 0, 0);
         result.setLayoutParams(params);
 
         return result;
