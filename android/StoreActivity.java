@@ -18,6 +18,8 @@ import android.widget.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.math.BigDecimal;
+import java.text.NumberFormat;
 import java.util.*;
 
 public class StoreActivity extends Activity {
@@ -47,8 +49,27 @@ public class StoreActivity extends Activity {
     };
 
     private final List<Product> products = new ArrayList<>();
-    private final Map<String, Integer> cart = new HashMap<>();
+
+    /*
+     * Внутри приложения количество хранится
+     * в половинах единицы:
+     *
+     * 1 = 0,5 кг
+     * 2 = 1 кг или 1 шт/уп
+     * 3 = 1,5 кг
+     *
+     * Это позволяет не использовать дробные вычисления
+     * при изменении количества и расчёте денег.
+     */
+    private final Map<String, Integer> cartHalves = new HashMap<>();
+
     private Set<String> favorites = new HashSet<>();
+
+    private final NumberFormat moneyFormat =
+            NumberFormat.getNumberInstance(new Locale("ru", "RU"));
+
+    private final NumberFormat quantityFormat =
+            NumberFormat.getNumberInstance(new Locale("ru", "RU"));
 
     private ShopApi api;
     private SharedPreferences prefs;
@@ -93,6 +114,12 @@ public class StoreActivity extends Activity {
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
+
+        moneyFormat.setMinimumFractionDigits(0);
+        moneyFormat.setMaximumFractionDigits(2);
+
+        quantityFormat.setMinimumFractionDigits(0);
+        quantityFormat.setMaximumFractionDigits(1);
 
         getWindow().setStatusBarColor(BLACK);
         getWindow().setNavigationBarColor(BLACK);
@@ -165,10 +192,16 @@ public class StoreActivity extends Activity {
 
             while (keys.hasNext()) {
                 String id = keys.next();
-                int value = saved.optInt(id, 0);
+                double value = saved.optDouble(id, 0);
+                double halves = value * 2;
 
-                if (value > 0 && value <= 50) {
-                    cart.put(id, value);
+                if (
+                        Double.isFinite(value) &&
+                        value >= 0.5 &&
+                        value <= 50 &&
+                        halves == Math.rint(halves)
+                ) {
+                    cartHalves.put(id, (int) halves);
                 }
             }
         } catch (Exception ignored) {
@@ -181,12 +214,45 @@ public class StoreActivity extends Activity {
         );
     }
 
-    private String money(long value) {
-        return String.format(
-                new Locale("ru", "RU"),
-                "%,d",
-                value
+    // Аргумент — сумма в целых копейках.
+    private String money(long kopecks) {
+        return moneyFormat.format(
+                BigDecimal.valueOf(kopecks, 2)
         ) + " ₽";
+    }
+
+    private boolean isKilogram(Product product) {
+        return "кг".equalsIgnoreCase(product.unit.trim());
+    }
+
+    private String quantityText(Product product, int halves) {
+        return quantityFormat.format(halves / 2.0)
+                + " " + product.unit;
+    }
+
+    private String stepText(Product product) {
+        return isKilogram(product)
+                ? "Шаг выбора — 500 г"
+                : "Шаг выбора — 1 " + product.unit;
+    }
+
+    private int halves(String id) {
+        Integer value = cartHalves.get(id);
+        return value == null ? 0 : value;
+    }
+
+    private long lineKopecks(Product product) {
+        return (long) product.price * 50L * halves(product.id);
+    }
+
+    private long totalKopecks() {
+        long sum = 0;
+
+        for (Product product : products) {
+            sum += lineKopecks(product);
+        }
+
+        return sum;
     }
 
     private GradientDrawable background(int color, boolean border) {
@@ -237,9 +303,11 @@ public class StoreActivity extends Activity {
     private Button secondary(String title, Runnable action) {
         Button view = button(title, action);
         view.setTextColor(GOLD);
+
         view.setBackgroundTintList(
                 ColorStateList.valueOf(LINE)
         );
+
         return view;
     }
 
@@ -259,6 +327,7 @@ public class StoreActivity extends Activity {
 
         params.setMargins(0, dp(8), 0, dp(8));
         content.addView(view, params);
+
         return view;
     }
 
@@ -329,7 +398,10 @@ public class StoreActivity extends Activity {
 
         for (int which : buttons) {
             Button view = dialog.getButton(which);
-            if (view != null) view.setTextColor(GOLD);
+
+            if (view != null) {
+                view.setTextColor(GOLD);
+            }
         }
     }
 
@@ -377,8 +449,16 @@ public class StoreActivity extends Activity {
         JSONObject saved = new JSONObject();
 
         try {
-            for (Map.Entry<String, Integer> entry : cart.entrySet()) {
-                saved.put(entry.getKey(), entry.getValue());
+            for (
+                    Map.Entry<String, Integer> entry :
+                    cartHalves.entrySet()
+            ) {
+                // В preferences остаётся реальное количество:
+                // 0.5, 1, 1.5 и т. д.
+                saved.put(
+                        entry.getKey(),
+                        entry.getValue() / 2.0
+                );
             }
         } catch (Exception ignored) {
         }
@@ -482,6 +562,7 @@ public class StoreActivity extends Activity {
         titles.setPadding(dp(12), 0, 0, 0);
 
         titles.addView(bold("Лавка Вкуса", 25, WHITE));
+
         titles.addView(text(
                 "Рыба · Морепродукты · Раки",
                 12,
@@ -505,11 +586,10 @@ public class StoreActivity extends Activity {
     private void drawNavigation() {
         for (int i = 0; i < tabs.length; i++) {
             final int tab = i;
-
             String label = tabs[i];
 
-            if (i == 3 && !cart.isEmpty()) {
-                label += " (" + cart.size() + ")";
+            if (i == 3 && !cartHalves.isEmpty()) {
+                label += " (" + cartHalves.size() + ")";
             }
 
             TextView item = text(
@@ -662,6 +742,7 @@ public class StoreActivity extends Activity {
 
         if (category.equals(value)) {
             chip.setTextColor(BLACK);
+
             chip.setBackgroundTintList(
                     ColorStateList.valueOf(GOLD)
             );
@@ -817,6 +898,7 @@ public class StoreActivity extends Activity {
         );
 
         picture.setOnClickListener(v -> showProduct(product));
+
         picture.setContentDescription(
                 "Открыть товар: " + product.name
         );
@@ -834,14 +916,26 @@ public class StoreActivity extends Activity {
         card.addView(name);
 
         card.addView(bold(
-                money(product.price) + " / " + product.unit,
+                money((long) product.price * 100)
+                        + " / " + product.unit,
                 17,
                 GOLD
         ));
 
+        if (isKilogram(product)) {
+            card.addView(text(
+                    "500 г — " + money((long) product.price * 50),
+                    12,
+                    MUTED
+            ));
+        } else {
+            card.addView(text(stepText(product), 12, MUTED));
+        }
+
         Button favorite = secondary(
                 favorites.contains(product.id)
-                        ? "♥ Сохранено" : "♡ Сохранить",
+                        ? "♥ Сохранено"
+                        : "♡ Сохранить",
                 () -> toggleFavorite(product)
         );
 
@@ -873,10 +967,19 @@ public class StoreActivity extends Activity {
         detail.addView(bold(product.name, 23, WHITE));
 
         detail.addView(bold(
-                money(product.price) + " / " + product.unit,
+                money((long) product.price * 100)
+                        + " / " + product.unit,
                 24,
                 GOLD
         ));
+
+        if (isKilogram(product)) {
+            detail.addView(text(
+                    "500 г — " + money((long) product.price * 50),
+                    17,
+                    GOLD
+            ));
+        }
 
         detail.addView(text(
                 product.description.isEmpty()
@@ -888,9 +991,8 @@ public class StoreActivity extends Activity {
         ));
 
         detail.addView(text(
-                "Сейчас количество выбирается целыми единицами: " +
-                product.unit + ". Оплата при получении.",
-                13,
+                stepText(product) + ".\nОплата при получении.",
+                14,
                 MUTED
         ));
 
@@ -900,7 +1002,9 @@ public class StoreActivity extends Activity {
                 .setView(body)
                 .setNegativeButton("Закрыть", null)
                 .setPositiveButton(
-                        "Добавить 1 " + product.unit,
+                        isKilogram(product)
+                                ? "Добавить 500 г"
+                                : "Добавить 1 " + product.unit,
                         null
                 )
                 .create();
@@ -941,11 +1045,11 @@ public class StoreActivity extends Activity {
             LinearLayout parent,
             Product product
     ) {
-        int value = quantity(product.id);
+        int value = halves(product.id);
 
         if (value == 0) {
             parent.addView(button(
-                    "В корзину",
+                    isKilogram(product) ? "+ 500 г" : "В корзину",
                     () -> changeQuantity(product, 1)
             ));
             return;
@@ -984,7 +1088,7 @@ public class StoreActivity extends Activity {
         );
 
         TextView count = bold(
-                value + " " + product.unit,
+                quantityText(product, value),
                 13,
                 WHITE
         );
@@ -1012,22 +1116,7 @@ public class StoreActivity extends Activity {
         return null;
     }
 
-    private int quantity(String id) {
-        Integer value = cart.get(id);
-        return value == null ? 0 : value;
-    }
-
-    private long total() {
-        long sum = 0;
-
-        for (Product product : products) {
-            sum += (long) product.price * quantity(product.id);
-        }
-
-        return sum;
-    }
-
-    private boolean changeQuantity(Product product, int delta) {
+    private boolean changeQuantity(Product product, int direction) {
         if (pendingOrder != null || sending) {
             message(
                     "Есть неподтверждённый заказ",
@@ -1037,23 +1126,36 @@ public class StoreActivity extends Activity {
             return false;
         }
 
-        int current = quantity(product.id);
+        int current = halves(product.id);
+        int step = isKilogram(product) ? 1 : 2;
+        int next;
 
-        if (delta > 0 && current >= 50) {
+        /*
+         * Если продавец изменил единицу с кг на шт/уп,
+         * прежнюю половину можно исправить кнопками:
+         * плюс округлит вверх, минус — вниз.
+         */
+        if (step == 2 && current % 2 != 0) {
+            next = direction > 0 ? current + 1 : current - 1;
+        } else {
+            next = current + direction * step;
+        }
+
+        if (next > 100) {
             message(
                     "Ограничение количества",
                     "В одном заказе можно выбрать не более " +
-                    "50 единиц одного товара."
+                    "50 " + product.unit + " одного товара."
             );
             return false;
         }
 
-        int value = Math.max(0, Math.min(50, current + delta));
+        next = Math.max(0, next);
 
-        if (value == 0) {
-            cart.remove(product.id);
+        if (next == 0) {
+            cartHalves.remove(product.id);
         } else {
-            cart.put(product.id, value);
+            cartHalves.put(product.id, next);
         }
 
         saveCart();
@@ -1075,14 +1177,16 @@ public class StoreActivity extends Activity {
 
             pending.addView(text(
                     "Результат предыдущей отправки не подтверждён. " +
-                    "Проверка использует тот же идентификатор " +
+                    "Проверка использует прежний идентификатор " +
                     "и не создаёт новый заказ с ним.",
                     14,
                     WHITE
             ));
 
             Button retry = button(
-                    sending ? "Проверяем…" : "Проверить прежний заказ",
+                    sending
+                            ? "Проверяем…"
+                            : "Проверить прежний заказ",
                     this::confirmPending
             );
 
@@ -1090,10 +1194,11 @@ public class StoreActivity extends Activity {
             pending.addView(retry);
         }
 
-        if (cart.isEmpty()) {
+        if (cartHalves.isEmpty()) {
             LinearLayout empty = panel();
 
             empty.addView(bold("Пока здесь пусто", 22, WHITE));
+
             empty.addView(text(
                     "Самое время выбрать что-нибудь вкусное.",
                     15,
@@ -1108,7 +1213,7 @@ public class StoreActivity extends Activity {
             return;
         }
 
-        for (String id : new ArrayList<>(cart.keySet())) {
+        for (String id : new ArrayList<>(cartHalves.keySet())) {
             Product product = findProduct(id);
 
             if (product == null) {
@@ -1124,7 +1229,7 @@ public class StoreActivity extends Activity {
                     unavailable.addView(secondary(
                             "Убрать недоступный товар",
                             () -> {
-                                cart.remove(id);
+                                cartHalves.remove(id);
                                 saveCart();
                                 redraw();
                             }
@@ -1149,17 +1254,30 @@ public class StoreActivity extends Activity {
             item.addView(bold(product.name, 20, WHITE));
 
             item.addView(text(
-                    money(product.price) + " / " + product.unit,
+                    money((long) product.price * 100)
+                            + " / " + product.unit,
                     15,
                     MUTED
             ));
 
+            item.addView(text(stepText(product), 13, MUTED));
+
+            if (
+                    !isKilogram(product) &&
+                    halves(product.id) % 2 != 0
+            ) {
+                item.addView(text(
+                        "Единица продажи изменилась. " +
+                        "Исправьте количество кнопкой «+» или «−».",
+                        14,
+                        GOLD
+                ));
+            }
+
             addQuantityControls(item, product);
 
             item.addView(bold(
-                    "Сумма: " + money(
-                            (long) product.price * quantity(product.id)
-                    ),
+                    "Сумма: " + money(lineKopecks(product)),
                     18,
                     GOLD
             ));
@@ -1168,12 +1286,13 @@ public class StoreActivity extends Activity {
         LinearLayout summary = panel();
 
         summary.addView(bold(
-                "Товары: " + money(total()),
+                "Товары: " + money(totalKopecks()),
                 25,
                 GOLD
         ));
 
         summary.addView(text(DELIVERY, 14, MUTED));
+
         summary.addView(text(
                 "Самовывоз: " + PICKUP,
                 14,
@@ -1201,7 +1320,10 @@ public class StoreActivity extends Activity {
                 this::prepareOrder
         );
 
-        send.setEnabled(freshCatalog && !sending);
+        send.setEnabled(
+                freshCatalog && !loading && !sending
+        );
+
         summary.addView(send);
 
         summary.addView(secondary(
@@ -1221,7 +1343,7 @@ public class StoreActivity extends Activity {
                     if (sending || pendingOrder != null) return;
 
                     saveProfile();
-                    cart.clear();
+                    cartHalves.clear();
                     saveCart();
                     render(false);
                 })
@@ -1375,6 +1497,7 @@ public class StoreActivity extends Activity {
                 "Сохранить данные",
                 () -> {
                     saveProfile();
+
                     message(
                             "Данные сохранены",
                             "При следующем заказе поля " +
@@ -1416,9 +1539,11 @@ public class StoreActivity extends Activity {
         }
 
         LinearLayout shop = panel();
+
         shop.addView(bold("Наш магазин", 20, GOLD));
         shop.addView(text(PICKUP, 16, WHITE));
         shop.addView(text(DELIVERY, 14, MUTED));
+
         shop.addView(text(
                 "Оплата при получении. Подтверждение " +
                 "и детали заказа согласует продавец.",
@@ -1466,6 +1591,7 @@ public class StoreActivity extends Activity {
 
                 try {
                     JSONArray array = data.getJSONArray("products");
+
                     List<Product> loaded = new ArrayList<>();
                     Set<String> ids = new HashSet<>();
 
@@ -1477,6 +1603,7 @@ public class StoreActivity extends Activity {
                         }
 
                         Product product = new Product();
+
                         product.id = stringValue(item, "id");
                         product.name = stringValue(item, "name");
                         product.category = stringValue(item, "category");
@@ -1498,6 +1625,7 @@ public class StoreActivity extends Activity {
                                 product.id.isEmpty() ||
                                 product.name.isEmpty() ||
                                 product.price <= 0 ||
+                                product.price > 1000000 ||
                                 !ids.add(product.id)
                         ) {
                             throw new Exception("Некорректный товар");
@@ -1513,12 +1641,15 @@ public class StoreActivity extends Activity {
 
                     freshCatalog = true;
                     loading = false;
+
                     render(true);
 
                 } catch (Exception error) {
                     saveProfile();
+
                     freshCatalog = false;
                     loading = false;
+
                     render(true);
 
                     message(
@@ -1534,10 +1665,11 @@ public class StoreActivity extends Activity {
                 if (destroyed) return;
 
                 saveProfile();
+
                 freshCatalog = false;
                 loading = false;
-                render(true);
 
+                render(true);
                 message("Каталог", error.getMessage());
             }
         });
@@ -1550,24 +1682,32 @@ public class StoreActivity extends Activity {
 
         String phone = customerPhone.replaceAll("[^0-9]", "");
 
-        if (!freshCatalog || cart.isEmpty()) {
+        if (
+                !freshCatalog ||
+                loading ||
+                cartHalves.isEmpty()
+        ) {
             message(
                     "Проверьте заказ",
-                    "Обновите каталог и выберите товары."
+                    "Дождитесь обновления каталога " +
+                    "и выберите товары."
             );
             return;
         }
 
-        if (cart.size() > 100) {
+        if (cartHalves.size() > 100) {
             message(
                     "Слишком много позиций",
-                    "В одном заказе допускается до 100 " +
-                    "разных товаров."
+                    "В одном заказе допускается " +
+                    "до 100 разных товаров."
             );
             return;
         }
 
-        if (customerName.length() < 2 || customerName.length() > 80) {
+        if (
+                customerName.length() < 2 ||
+                customerName.length() > 80
+        ) {
             message(
                     "Проверьте имя",
                     "Введите имя от 2 до 80 символов."
@@ -1614,11 +1754,28 @@ public class StoreActivity extends Activity {
             return;
         }
 
+        if (
+                totalKopecks() <= 0 ||
+                totalKopecks() > 1000000000L
+        ) {
+            message(
+                    "Проверьте сумму",
+                    "Сумма товаров должна быть больше нуля " +
+                    "и не превышать 10 000 000 ₽."
+            );
+            return;
+        }
+
         try {
             JSONArray items = new JSONArray();
 
-            for (Map.Entry<String, Integer> entry : cart.entrySet()) {
-                if (findProduct(entry.getKey()) == null) {
+            for (
+                    Map.Entry<String, Integer> entry :
+                    cartHalves.entrySet()
+            ) {
+                Product product = findProduct(entry.getKey());
+
+                if (product == null) {
                     message(
                             "Есть недоступный товар",
                             "Уберите недоступный товар из корзины " +
@@ -1627,18 +1784,46 @@ public class StoreActivity extends Activity {
                     return;
                 }
 
+                int value = entry.getValue();
+
+                if (
+                        value < 1 ||
+                        value > 100 ||
+                        (!isKilogram(product) && value % 2 != 0)
+                ) {
+                    message(
+                            "Проверьте количество",
+                            "Исправьте количество товара «" +
+                            product.name + "». Для штук " +
+                            "и упаковок нужны целые числа."
+                    );
+                    return;
+                }
+
                 JSONObject item = new JSONObject();
+
                 item.put("productId", entry.getKey());
-                item.put("quantity", entry.getValue());
+                item.put("quantity", value / 2.0);
+
                 items.put(item);
             }
 
             JSONObject order = new JSONObject();
+
             order.put("requestId", UUID.randomUUID().toString());
             order.put("name", customerName);
             order.put("phone", phone);
-            order.put("fulfillment", delivery ? "delivery" : "pickup");
-            order.put("address", delivery ? customerAddress : "");
+
+            order.put(
+                    "fulfillment",
+                    delivery ? "delivery" : "pickup"
+            );
+
+            order.put(
+                    "address",
+                    delivery ? customerAddress : ""
+            );
+
             order.put("comment", customerComment);
             order.put("items", items);
 
@@ -1656,7 +1841,7 @@ public class StoreActivity extends Activity {
         AlertDialog dialog = dialogBuilder()
                 .setTitle("Подтвердите заказ")
                 .setMessage(
-                        "Товары: " + money(total()) + "\n\n" +
+                        "Товары: " + money(totalKopecks()) + "\n\n" +
                         (
                                 delivery
                                         ? "Доставка:\n" +
@@ -1738,6 +1923,22 @@ public class StoreActivity extends Activity {
         }
     }
 
+    private long responseKopecks(JSONObject data) throws Exception {
+        BigDecimal rubles = new BigDecimal(
+                data.get("totalRub").toString()
+        );
+
+        long kopecks = rubles
+                .movePointRight(2)
+                .longValueExact();
+
+        if (kopecks <= 0 || kopecks > 1000000000L) {
+            throw new Exception("Некорректная сумма ответа");
+        }
+
+        return kopecks;
+    }
+
     private void sendPending() {
         if (sending || pendingOrder == null) return;
 
@@ -1763,16 +1964,25 @@ public class StoreActivity extends Activity {
                 if (destroyed) return;
 
                 String id = data.optString("id", "");
+                final long confirmedKopecks;
 
-                if (id.isEmpty() || !data.has("totalRub")) {
+                try {
+                    if (id.isEmpty()) {
+                        throw new Exception("Нет идентификатора");
+                    }
+
+                    confirmedKopecks = responseKopecks(data);
+
+                } catch (Exception error) {
                     sending = false;
                     redraw();
 
                     message(
                             "Нет подтверждения",
-                            "Ответ сервера неполный. Заказ " +
-                            "сохранён на телефоне. Используйте " +
-                            "проверку прежнего заказа."
+                            "Ответ сервера неполный или содержит " +
+                            "неверную сумму. Заказ сохранён " +
+                            "на телефоне. Используйте проверку " +
+                            "прежнего заказа."
                     );
                     return;
                 }
@@ -1785,8 +1995,7 @@ public class StoreActivity extends Activity {
                                         ? "Заказ № " + orderNumber
                                         : "Заказ сохранён. Номер уточняется."
                         ) +
-                        "\nТовары: " +
-                        money(data.optLong("totalRub"));
+                        "\nТовары: " + money(confirmedKopecks);
 
                 boolean saved = prefs.edit()
                         .remove("pending_order")
@@ -1812,7 +2021,7 @@ public class StoreActivity extends Activity {
                 saveProfile();
 
                 pendingOrder = null;
-                cart.clear();
+                cartHalves.clear();
                 consent = false;
                 customerComment = "";
                 currentTab = 4;
@@ -1835,8 +2044,6 @@ public class StoreActivity extends Activity {
                 saveProfile();
                 sending = false;
 
-                // При конфликте идентификатора сохраняем заказ:
-                // сначала продавец должен проверить его в базе.
                 if (
                         error.shouldClearPendingOrder() &&
                         error.statusCode != 409
@@ -1845,7 +2052,9 @@ public class StoreActivity extends Activity {
                             .remove("pending_order")
                             .commit();
 
-                    if (removed) pendingOrder = null;
+                    if (removed) {
+                        pendingOrder = null;
+                    }
                 }
 
                 render(true);
@@ -1857,11 +2066,13 @@ public class StoreActivity extends Activity {
                             "\n\nОбнаружен конфликт идентификатора. " +
                             "Свяжитесь с магазином для проверки. " +
                             "Не оформляйте этот заказ заново.";
+
                 } else if (pendingOrder != null) {
                     advice =
                             "\n\nЗаказ сохранён на телефоне. " +
                             "Используйте «Проверить прежний заказ», " +
                             "а не создавайте новый.";
+
                 } else {
                     advice =
                             "\n\nПроверьте данные и актуальность " +
