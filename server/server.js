@@ -6,12 +6,30 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { Pool } = require("pg");
 
+const {
+  pushConfigured
+} = require("./firebase-push");
+
+const {
+  initializeOrderPush,
+  subscribeOrderPush,
+  unsubscribeOrderPush,
+  changeOrderStatusWithPush,
+  startOrderPushWorker
+} = require("./order-push");
+
 // -------------------- НАСТРОЙКИ --------------------
 
 const PORT = Number(process.env.PORT || 3000);
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
-const CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
+
+const BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || "";
+
+const CHAT_ID =
+  process.env.TELEGRAM_CHAT_ID || "";
+
+const ADMIN_TOKEN =
+  process.env.ADMIN_TOKEN || "";
 
 const CLOUD_NAME =
   (process.env.CLOUDINARY_CLOUD_NAME || "").trim();
@@ -38,7 +56,8 @@ const STORE_TIME_ZONE = "Europe/Moscow";
 const SCHEDULE_DAYS_AHEAD = 60;
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const MAX_UPLOAD_BODY_BYTES = 7 * 1024 * 1024 + 16384;
+const MAX_UPLOAD_BODY_BYTES =
+  7 * 1024 * 1024 + 16384;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -77,8 +96,12 @@ const pool = new Pool({
 });
 
 pool.on("error", () => {
-  console.error("Ошибка фонового подключения к базе данных.");
+  console.error(
+    "Ошибка фонового подключения к базе данных."
+  );
 });
+
+let pushWorker = null;
 
 // -------------------- ОБЩИЕ ФУНКЦИИ --------------------
 
@@ -89,7 +112,9 @@ function fail(status, message) {
 }
 
 function json(res, status, data) {
-  if (res.destroyed || res.writableEnded) return;
+  if (res.destroyed || res.writableEnded) {
+    return;
+  }
 
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
@@ -131,13 +156,18 @@ function sameHash(first, second) {
 }
 
 function isKilogram(unit) {
-  return String(unit || "").trim().toLowerCase() === "кг";
+  return String(unit || "")
+    .trim()
+    .toLowerCase() === "кг";
 }
 
-const moneyFormatter = new Intl.NumberFormat("ru-RU", {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 2
-});
+const moneyFormatter = new Intl.NumberFormat(
+  "ru-RU",
+  {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  }
+);
 
 function rub(value) {
   return moneyFormatter.format(Number(value)) + " ₽";
@@ -153,14 +183,25 @@ function cloudinaryConfigured() {
 
 function checkAdmin(req) {
   if (ADMIN_TOKEN.length < 32) {
-    throw fail(503, "Доступ продавца ещё не настроен.");
+    throw fail(
+      503,
+      "Доступ продавца ещё не настроен."
+    );
   }
 
-  const received = String(req.headers.authorization || "");
+  const received =
+    String(req.headers.authorization || "");
+
   const expected = `Bearer ${ADMIN_TOKEN}`;
 
-  if (!sameHash(sha256(received), sha256(expected))) {
-    throw fail(401, "Неверный ключ доступа продавца.");
+  if (!sameHash(
+    sha256(received),
+    sha256(expected)
+  )) {
+    throw fail(
+      401,
+      "Неверный ключ доступа продавца."
+    );
   }
 }
 
@@ -170,7 +211,8 @@ async function readJson(req, maxBytes = 32768) {
   ).toLowerCase();
 
   if (
-    contentType.split(";")[0].trim() !== "application/json"
+    contentType.split(";")[0].trim() !==
+    "application/json"
   ) {
     req.resume();
     throw fail(415, "Ожидается JSON.");
@@ -188,51 +230,64 @@ async function readJson(req, maxBytes = 32768) {
     throw fail(413, "Слишком большой запрос.");
   }
 
-  const buffer = await new Promise((resolve, reject) => {
-    let chunks = [];
-    let size = 0;
-    let finished = false;
+  const buffer = await new Promise(
+    (resolve, reject) => {
+      let chunks = [];
+      let size = 0;
+      let finished = false;
 
-    function rejectOnce(error) {
-      if (finished) return;
-      finished = true;
-      chunks = [];
-      reject(error);
-    }
+      function rejectOnce(error) {
+        if (finished) return;
 
-    req.on("data", (chunk) => {
-      if (finished) return;
-
-      size += chunk.length;
-
-      if (size > maxBytes) {
-        rejectOnce(fail(413, "Слишком большой запрос."));
-        return;
+        finished = true;
+        chunks = [];
+        reject(error);
       }
 
-      chunks.push(chunk);
-    });
+      req.on("data", (chunk) => {
+        if (finished) return;
 
-    req.on("end", () => {
-      if (finished) return;
-      finished = true;
+        size += chunk.length;
 
-      const result = Buffer.concat(chunks);
-      chunks = [];
-      resolve(result);
-    });
+        if (size > maxBytes) {
+          rejectOnce(
+            fail(413, "Слишком большой запрос.")
+          );
+          return;
+        }
 
-    req.on("aborted", () => {
-      rejectOnce(fail(400, "Загрузка запроса прервана."));
-    });
+        chunks.push(chunk);
+      });
 
-    req.on("error", () => {
-      rejectOnce(fail(400, "Не удалось прочитать запрос."));
-    });
-  });
+      req.on("end", () => {
+        if (finished) return;
+
+        finished = true;
+
+        const result = Buffer.concat(chunks);
+        chunks = [];
+
+        resolve(result);
+      });
+
+      req.on("aborted", () => {
+        rejectOnce(
+          fail(400, "Загрузка запроса прервана.")
+        );
+      });
+
+      req.on("error", () => {
+        rejectOnce(
+          fail(400, "Не удалось прочитать запрос.")
+        );
+      });
+    }
+  );
 
   try {
-    const data = JSON.parse(buffer.toString("utf8"));
+    const data = JSON.parse(
+      buffer.toString("utf8")
+    );
 
     if (
       !data ||
@@ -264,19 +319,26 @@ function deliveryOptions() {
     cities: [...FREE_DELIVERY_CITIES],
     otherCityAllowed: true,
     cityField: "deliveryCity",
+
     freeDeliveryThresholdRub:
       FREE_DELIVERY_THRESHOLD_KOPECKS / 100,
+
     pickupAddress: PICKUP,
+
     otherCityMessage:
       "Возможность и стоимость доставки согласует магазин.",
+
     belowThresholdMessage:
       "Стоимость доставки согласуется с покупателем.",
+
     deliveryFeeCalculatedAutomatically: false
   };
 }
 
 function normalizeDeliveryCity(data, fulfillment) {
-  if (fulfillment !== "delivery") return "";
+  if (fulfillment !== "delivery") {
+    return "";
+  }
 
   if (
     !Object.prototype.hasOwnProperty.call(
@@ -306,11 +368,6 @@ function normalizeDeliveryCity(data, fulfillment) {
 
   const normalized = raw.replace(/\s+/g, " ");
 
-  /*
-   * Сохраняем прежнее правило сервера:
-   * для другого города необходимо его название,
-   * а не условное значение «Другой город».
-   */
   if (
     ["другой город", "другой", "other"]
       .includes(cityKey(normalized))
@@ -336,6 +393,7 @@ function calculateDeliveryInfo(
   const common = {
     policyVersion: DELIVERY_POLICY_VERSION,
     city: deliveryCity || "",
+
     freeDeliveryThresholdRub:
       FREE_DELIVERY_THRESHOLD_KOPECKS / 100
   };
@@ -353,9 +411,11 @@ function calculateDeliveryInfo(
     };
   }
 
-  const zoneEligible = FREE_DELIVERY_CITIES.some(
-    (city) => cityKey(city) === cityKey(deliveryCity)
-  );
+  const zoneEligible =
+    FREE_DELIVERY_CITIES.some(
+      (city) =>
+        cityKey(city) === cityKey(deliveryCity)
+    );
 
   if (!deliveryCity) {
     return {
@@ -365,6 +425,7 @@ function calculateDeliveryInfo(
       remainingRub: null,
       deliveryFeeRub: null,
       deliveryFeeStatus: "by_agreement",
+
       message:
         "Город не выбран в приложении. " +
         "Условия и стоимость доставки уточнит магазин. " +
@@ -381,13 +442,17 @@ function calculateDeliveryInfo(
       remainingRub: null,
       deliveryFeeRub: null,
       deliveryFeeStatus: "by_agreement",
+
       message:
         "Возможность и стоимость доставки " +
         "в этот город согласует магазин."
     };
   }
 
-  if (totalKopecks >= FREE_DELIVERY_THRESHOLD_KOPECKS) {
+  if (
+    totalKopecks >=
+    FREE_DELIVERY_THRESHOLD_KOPECKS
+  ) {
     return {
       ...common,
       zoneEligible: true,
@@ -395,13 +460,15 @@ function calculateDeliveryInfo(
       remainingRub: 0,
       deliveryFeeRub: 0,
       deliveryFeeStatus: "free",
+
       message:
         `Доставка по городу ${deliveryCity} — бесплатно.`
     };
   }
 
   const remainingKopecks =
-    FREE_DELIVERY_THRESHOLD_KOPECKS - totalKopecks;
+    FREE_DELIVERY_THRESHOLD_KOPECKS -
+    totalKopecks;
 
   return {
     ...common,
@@ -410,6 +477,7 @@ function calculateDeliveryInfo(
     remainingRub: remainingKopecks / 100,
     deliveryFeeRub: null,
     deliveryFeeStatus: "by_agreement",
+
     message:
       "Стоимость доставки согласуется с покупателем. " +
       "До бесплатной доставки осталось " +
@@ -450,6 +518,7 @@ function storedDeliveryInfo(row) {
     remainingRub: null,
     deliveryFeeRub: null,
     deliveryFeeStatus: "legacy",
+
     message:
       "Условия доставки этого старого заказа " +
       "уточняйте по ранее достигнутой договорённости с магазином."
@@ -458,23 +527,28 @@ function storedDeliveryInfo(row) {
 
 // -------------------- ДАТЫ И ИНТЕРВАЛЫ --------------------
 
-const storeDateFormatter = new Intl.DateTimeFormat(
-  "en-GB",
-  {
-    timeZone: STORE_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }
-);
+const storeDateFormatter =
+  new Intl.DateTimeFormat(
+    "en-GB",
+    {
+      timeZone: STORE_TIME_ZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }
+  );
 
 function storeToday() {
-  const parts = storeDateFormatter.formatToParts(new Date());
+  const parts = storeDateFormatter.formatToParts(
+    new Date()
+  );
 
   const get = (type) =>
     parts.find((part) => part.type === type).value;
 
-  return `${get("year")}-${get("month")}-${get("day")}`;
+  return (
+    `${get("year")}-${get("month")}-${get("day")}`
+  );
 }
 
 function validDate(value) {
@@ -485,7 +559,9 @@ function validDate(value) {
     return false;
   }
 
-  const parsed = new Date(`${value}T00:00:00.000Z`);
+  const parsed = new Date(
+    `${value}T00:00:00.000Z`
+  );
 
   return (
     Number.isFinite(parsed.getTime()) &&
@@ -494,8 +570,12 @@ function validDate(value) {
 }
 
 function addDays(date, count) {
-  const value = new Date(`${date}T00:00:00.000Z`);
+  const value = new Date(
+    `${date}T00:00:00.000Z`
+  );
+
   value.setUTCDate(value.getUTCDate() + count);
+
   return value.toISOString().slice(0, 10);
 }
 
@@ -521,6 +601,7 @@ function scheduleOptions() {
     requiredForLegacyClients: false,
     capacityLimited: false,
     citySpecific: false,
+
     message:
       "Выбор интервала не заменяет подтверждение магазина. " +
       "Для других городов возможность доставки " +
@@ -541,9 +622,11 @@ function slotView(row) {
     fulfillment: row.fulfillment,
     enabled: row.enabled,
     timeZone: STORE_TIME_ZONE,
+
     label:
       `${displaySlotDate(date)}, ` +
       `${startTime}–${endTime}`,
+
     updatedAt: row.updated_at
   };
 }
@@ -572,6 +655,7 @@ function storedReceivingSlot(row) {
     endTime: slot.endTime,
     fulfillment: slot.fulfillment,
     timeZone: slot.timeZone || STORE_TIME_ZONE,
+
     label:
       `${displaySlotDate(slot.date)}, ` +
       `${slot.startTime}–${slot.endTime}`
@@ -585,19 +669,28 @@ function normalizeSlot(data) {
   const fulfillment = data.fulfillment;
 
   const enabled =
-    data.enabled === undefined ? true : data.enabled;
+    data.enabled === undefined
+      ? true
+      : data.enabled;
 
   if (!validDate(date)) {
-    throw fail(400, "Выберите корректную дату интервала.");
+    throw fail(
+      400,
+      "Выберите корректную дату интервала."
+    );
   }
 
   const today = storeToday();
-  const lastDate = addDays(today, SCHEDULE_DAYS_AHEAD);
+
+  const lastDate = addDays(
+    today,
+    SCHEDULE_DAYS_AHEAD
+  );
 
   if (date < today || date > lastDate) {
     throw fail(
       400,
-      `Интервалы можно настраивать на сегодня ` +
+      "Интервалы можно настраивать на сегодня " +
       `и ближайшие ${SCHEDULE_DAYS_AHEAD} дней.`
     );
   }
@@ -614,7 +707,9 @@ function normalizeSlot(data) {
     );
   }
 
-  if (!["delivery", "pickup"].includes(fulfillment)) {
+  if (
+    !["delivery", "pickup"].includes(fulfillment)
+  ) {
     throw fail(
       400,
       "Выберите доставку или самовывоз для интервала."
@@ -622,20 +717,22 @@ function normalizeSlot(data) {
   }
 
   if (typeof enabled !== "boolean") {
-    throw fail(400, "Некорректное состояние интервала.");
+    throw fail(
+      400,
+      "Некорректное состояние интервала."
+    );
   }
 
-  /*
-   * Для Europe/Moscow используется UTC+3.
-   * Клиент не передаёт свой часовой пояс.
-   */
   const startsAt = Date.parse(
     `${date}T${startTime}:00+03:00`
   );
 
   if (
     enabled &&
-    (!Number.isFinite(startsAt) || startsAt <= Date.now())
+    (
+      !Number.isFinite(startsAt) ||
+      startsAt <= Date.now()
+    )
   ) {
     throw fail(
       400,
@@ -659,14 +756,18 @@ async function listSlots(url, admin) {
     ? addDays(today, -7)
     : today;
 
-  const lastDate =
-    addDays(today, SCHEDULE_DAYS_AHEAD);
+  const lastDate = addDays(
+    today,
+    SCHEDULE_DAYS_AHEAD
+  );
 
   const from =
-    url.searchParams.get("from") || defaultFrom;
+    url.searchParams.get("from") ||
+    defaultFrom;
 
   const to =
-    url.searchParams.get("to") || lastDate;
+    url.searchParams.get("to") ||
+    lastDate;
 
   const fulfillment =
     url.searchParams.get("fulfillment") || "";
@@ -676,7 +777,10 @@ async function listSlots(url, admin) {
     !validDate(to) ||
     from > to
   ) {
-    throw fail(400, "Некорректный диапазон дат.");
+    throw fail(
+      400,
+      "Некорректный диапазон дат."
+    );
   }
 
   if (
@@ -693,7 +797,10 @@ async function listSlots(url, admin) {
     fulfillment &&
     !["delivery", "pickup"].includes(fulfillment)
   ) {
-    throw fail(400, "Некорректный способ получения.");
+    throw fail(
+      400,
+      "Некорректный способ получения."
+    );
   }
 
   const result = await pool.query(
@@ -801,7 +908,10 @@ async function updateSlot(id, data) {
     return slotView(result.rows[0]);
   } catch (error) {
     if (error.code === "23505") {
-      throw fail(409, "Такой интервал уже существует.");
+      throw fail(
+        409,
+        "Такой интервал уже существует."
+      );
     }
 
     throw error;
@@ -810,7 +920,10 @@ async function updateSlot(id, data) {
 
 async function setSlotEnabled(id, data) {
   if (typeof data.enabled !== "boolean") {
-    throw fail(400, "Укажите enabled: true или false.");
+    throw fail(
+      400,
+      "Укажите enabled: true или false."
+    );
   }
 
   const client = await pool.connect();
@@ -873,7 +986,9 @@ async function setSlotEnabled(id, data) {
 
     return slotView(updated.rows[0]);
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK")
+      .catch(() => {});
+
     throw error;
   } finally {
     client.release();
@@ -887,7 +1002,6 @@ function normalizeReceivingSlotId(data) {
       "receivingSlotId"
     )
   ) {
-    // Совместимость с прежним приложением.
     return "";
   }
 
@@ -904,16 +1018,14 @@ function normalizeReceivingSlotId(data) {
   return data.receivingSlotId;
 }
 
-async function receivingSlotForOrder(client, order) {
+async function receivingSlotForOrder(
+  client,
+  order
+) {
   if (!order.receivingSlotId) {
     return null;
   }
 
-  /*
-   * Блокировка удерживается до сохранения заказа.
-   * Одновременное закрытие или изменение интервала
-   * не сможет незаметно изменить его в этой транзакции.
-   */
   const result = await client.query(
     `SELECT
        *,
@@ -963,10 +1075,6 @@ async function receivingSlotForOrder(client, order) {
 
   const view = slotView(row);
 
-  /*
-   * Сохраняем снимок. Последующее редактирование
-   * расписания не изменяет дату старого заказа.
-   */
   return {
     id: view.id,
     date: view.date,
@@ -985,7 +1093,8 @@ let writeCount = 0;
 
 function limitWrites(req) {
   if (
-    !["POST", "PUT", "PATCH", "DELETE"].includes(req.method)
+    !["POST", "PUT", "PATCH", "DELETE"]
+      .includes(req.method)
   ) {
     return;
   }
@@ -1044,13 +1153,16 @@ function productView(row) {
       : Number(row.old_price_rub);
 
   const isPromotion =
-    Number.isInteger(candidate) && candidate > priceRub;
+    Number.isInteger(candidate) &&
+    candidate > priceRub;
 
-  const oldPriceRub = isPromotion ? candidate : null;
+  const oldPriceRub =
+    isPromotion ? candidate : null;
 
   const discountPercent = isPromotion
     ? Math.floor(
-        ((oldPriceRub - priceRub) * 100) / oldPriceRub
+        ((oldPriceRub - priceRub) * 100) /
+        oldPriceRub
       )
     : 0;
 
@@ -1107,13 +1219,20 @@ function customerOrderView(row) {
     deliveryCity: row.delivery_city || "",
     deliveryInfo: storedDeliveryInfo(row),
     receivingSlot: storedReceivingSlot(row),
+
     pickupAddress:
-      row.fulfillment === "pickup" ? PICKUP : "",
+      row.fulfillment === "pickup"
+        ? PICKUP
+        : "",
+
     items: row.items,
     totalRub: Number(row.total_rub),
     status: row.status,
+
     statusName:
-      STATUS_NAMES[row.status] || "Статус уточняется",
+      STATUS_NAMES[row.status] ||
+      "Статус уточняется",
+
     payment: "on_receipt"
   };
 }
@@ -1288,22 +1407,31 @@ async function initializeDatabase() {
       ["bream", "Тушка леща с икрой", "Рыба", 1700, 3]
     ];
 
-    for (const [id, name, category, price, position] of seeds) {
+    for (
+      const [id, name, category, price, position]
+      of seeds
+    ) {
       await client.query(
-        `INSERT INTO lv_products
-          (id, name, category, price_rub, sort_order)
+        `INSERT INTO lv_products (
+           id, name, category, price_rub, sort_order
+         )
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (id) DO NOTHING`,
-        [id, name, category, price, position]
+        [
+          id,
+          name,
+          category,
+          price,
+          position
+        ]
       );
     }
 
-    // Интервалы автоматически не создаём:
-    // реальные дни и часы назначает продавец.
-
     await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK")
+      .catch(() => {});
+
     throw error;
   } finally {
     client.release();
@@ -1316,18 +1444,29 @@ function normalizeProduct(data, id) {
   const name = text(data.name, 120);
 
   const category =
-    text(data.category, 80) || "Рыба и морепродукты";
+    text(data.category, 80) ||
+    "Рыба и морепродукты";
 
-  const description = text(data.description, 2000);
-  const unit = text(data.unit, 20) || "кг";
-  const imageUrl = text(data.imageUrl, 1500);
+  const description =
+    text(data.description, 2000);
+
+  const unit =
+    text(data.unit, 20) || "кг";
+
+  const imageUrl =
+    text(data.imageUrl, 1500);
+
   const priceRub = data.priceRub;
 
   const available =
-    data.available === undefined ? true : data.available;
+    data.available === undefined
+      ? true
+      : data.available;
 
   const sortOrder =
-    data.sortOrder === undefined ? 0 : data.sortOrder;
+    data.sortOrder === undefined
+      ? 0
+      : data.sortOrder;
 
   const oldPriceProvided =
     Object.prototype.hasOwnProperty.call(
@@ -1358,11 +1497,17 @@ function normalizeProduct(data, id) {
   }
 
   if (!PRODUCT_ID_PATTERN.test(id)) {
-    throw fail(400, "Некорректный код товара.");
+    throw fail(
+      400,
+      "Некорректный код товара."
+    );
   }
 
   if (name.length < 2) {
-    throw fail(400, "Укажите название товара.");
+    throw fail(
+      400,
+      "Укажите название товара."
+    );
   }
 
   if (
@@ -1388,11 +1533,17 @@ function normalizeProduct(data, id) {
   }
 
   if (!["кг", "шт", "уп"].includes(unit)) {
-    throw fail(400, "Выберите единицу: кг, шт или уп.");
+    throw fail(
+      400,
+      "Выберите единицу: кг, шт или уп."
+    );
   }
 
   if (typeof available !== "boolean") {
-    throw fail(400, "Некорректное значение наличия.");
+    throw fail(
+      400,
+      "Некорректное значение наличия."
+    );
   }
 
   if (
@@ -1400,7 +1551,10 @@ function normalizeProduct(data, id) {
     sortOrder < -100000 ||
     sortOrder > 100000
   ) {
-    throw fail(400, "Некорректный порядок сортировки.");
+    throw fail(
+      400,
+      "Некорректный порядок сортировки."
+    );
   }
 
   if (imageUrl) {
@@ -1440,7 +1594,8 @@ function normalizeProduct(data, id) {
 function mapProductDatabaseError(error) {
   if (
     error.code === "23514" &&
-    error.constraint === "lv_products_old_price_check"
+    error.constraint ===
+      "lv_products_old_price_check"
   ) {
     return fail(
       400,
@@ -1464,12 +1619,12 @@ async function createProduct(data) {
   try {
     const result = await pool.query(
       `INSERT INTO lv_products (
-        id, name, category, description,
-        price_rub, old_price_rub, unit,
-        image_url, available, sort_order
-      )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-      RETURNING *`,
+         id, name, category, description,
+         price_rub, old_price_rub, unit,
+         image_url, available, sort_order
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
       [
         p.id,
         p.name,
@@ -1503,19 +1658,19 @@ async function updateProduct(id, data) {
   try {
     const result = await pool.query(
       `UPDATE lv_products SET
-        name = $2,
-        category = $3,
-        description = $4,
-        price_rub = $5,
-        old_price_rub = CASE
-          WHEN $6::boolean THEN $7::integer
-          ELSE old_price_rub
-        END,
-        unit = $8,
-        image_url = $9,
-        available = $10,
-        sort_order = $11,
-        updated_at = NOW()
+         name = $2,
+         category = $3,
+         description = $4,
+         price_rub = $5,
+         old_price_rub = CASE
+           WHEN $6::boolean THEN $7::integer
+           ELSE old_price_rub
+         END,
+         unit = $8,
+         image_url = $9,
+         available = $10,
+         sort_order = $11,
+         updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
       [
@@ -1576,7 +1731,10 @@ function normalizeOrder(data) {
   }
 
   const name = text(data.name, 80);
-  const phone = text(data.phone, 32).replace(/\D/g, "");
+
+  const phone = text(data.phone, 32)
+    .replace(/\D/g, "");
+
   const fulfillment = data.fulfillment;
 
   const address =
@@ -1584,25 +1742,37 @@ function normalizeOrder(data) {
       ? text(data.address, 250)
       : "";
 
-  const comment = text(data.comment, 300);
+  const comment =
+    text(data.comment, 300);
 
   if (name.length < 2) {
     throw fail(400, "Укажите имя.");
   }
 
   if (!/^[78]\d{10}$/.test(phone)) {
-    throw fail(400, "Проверьте номер телефона.");
+    throw fail(
+      400,
+      "Проверьте номер телефона."
+    );
   }
 
-  if (!["delivery", "pickup"].includes(fulfillment)) {
-    throw fail(400, "Выберите доставку или самовывоз.");
+  if (
+    !["delivery", "pickup"].includes(fulfillment)
+  ) {
+    throw fail(
+      400,
+      "Выберите доставку или самовывоз."
+    );
   }
 
   if (
     fulfillment === "delivery" &&
     address.length < 5
   ) {
-    throw fail(400, "Укажите полный адрес доставки.");
+    throw fail(
+      400,
+      "Укажите полный адрес доставки."
+    );
   }
 
   const deliveryCity =
@@ -1627,10 +1797,15 @@ function normalizeOrder(data) {
       typeof item !== "object" ||
       Array.isArray(item)
     ) {
-      throw fail(400, "Некорректная позиция заказа.");
+      throw fail(
+        400,
+        "Некорректная позиция заказа."
+      );
     }
 
-    const productId = text(item.productId, 80);
+    const productId =
+      text(item.productId, 80);
+
     const quantity = item.quantity;
 
     if (
@@ -1662,8 +1837,8 @@ function normalizeOrder(data) {
   );
 
   /*
-   * Не меняем порядок прежних полей.
-   * Это сохраняет fingerprint старых pending_order.
+   * Порядок полей сохранён для совместимости
+   * с прежними неподтверждёнными заказами.
    */
   const order = {
     requestId,
@@ -1688,8 +1863,14 @@ function normalizeOrder(data) {
 
 // -------------------- СОХРАНЕНИЕ ЗАКАЗА --------------------
 
-async function saveOrder(order, trackingTokenHash) {
-  const fingerprint = sha256(JSON.stringify(order));
+async function saveOrder(
+  order,
+  trackingTokenHash
+) {
+  const fingerprint = sha256(
+    JSON.stringify(order)
+  );
+
   const client = await pool.connect();
 
   try {
@@ -1701,7 +1882,9 @@ async function saveOrder(order, trackingTokenHash) {
     );
 
     const existing = await client.query(
-      "SELECT * FROM lv_orders WHERE request_id = $1",
+      `SELECT *
+       FROM lv_orders
+       WHERE request_id = $1`,
       [order.requestId]
     );
 
@@ -1732,10 +1915,6 @@ async function saveOrder(order, trackingTokenHash) {
 
       await client.query("COMMIT");
 
-      /*
-       * Повторная проверка возвращает старый заказ,
-       * даже если его интервал уже прошёл или закрыт.
-       */
       return {
         row,
         created: false
@@ -1743,11 +1922,16 @@ async function saveOrder(order, trackingTokenHash) {
     }
 
     const found = await client.query(
-      `SELECT * FROM lv_products
+      `SELECT *
+       FROM lv_products
        WHERE id = ANY($1::text[])
        ORDER BY id
        FOR SHARE`,
-      [order.items.map((item) => item.productId)]
+      [
+        order.items.map(
+          (item) => item.productId
+        )
+      ]
     );
 
     const products = new Map(
@@ -1760,7 +1944,8 @@ async function saveOrder(order, trackingTokenHash) {
     let totalKopecks = 0;
 
     const snapshot = order.items.map((item) => {
-      const product = products.get(item.productId);
+      const product =
+        products.get(item.productId);
 
       if (!product || !product.available) {
         throw fail(
@@ -1790,7 +1975,10 @@ async function saveOrder(order, trackingTokenHash) {
         !Number.isSafeInteger(lineKopecks) ||
         lineKopecks <= 0
       ) {
-        throw fail(400, "Некорректная сумма позиции.");
+        throw fail(
+          400,
+          "Некорректная сумма позиции."
+        );
       }
 
       totalKopecks += lineKopecks;
@@ -1810,40 +1998,45 @@ async function saveOrder(order, trackingTokenHash) {
       totalKopecks <= 0 ||
       totalKopecks > 1000000000
     ) {
-      throw fail(400, "Недопустимая сумма заказа.");
+      throw fail(
+        400,
+        "Недопустимая сумма заказа."
+      );
     }
 
-    const deliveryCity = order.deliveryCity || "";
+    const deliveryCity =
+      order.deliveryCity || "";
 
-    const deliveryInfo = calculateDeliveryInfo(
-      order.fulfillment,
-      deliveryCity,
-      totalKopecks
-    );
+    const deliveryInfo =
+      calculateDeliveryInfo(
+        order.fulfillment,
+        deliveryCity,
+        totalKopecks
+      );
 
-    /*
-     * Проверяем интервал только для нового заказа.
-     * Клиент передаёт лишь ID, даты и часы берём из БД.
-     */
     const receivingSlot =
-      await receivingSlotForOrder(client, order);
+      await receivingSlotForOrder(
+        client,
+        order
+      );
 
-    const id = `LV-${crypto.randomUUID()}`;
+    const id =
+      `LV-${crypto.randomUUID()}`;
 
     const result = await client.query(
       `INSERT INTO lv_orders (
-        id, request_id, fingerprint,
-        customer_name, phone, fulfillment,
-        address, comment, items, total_rub,
-        tracking_token_hash,
-        delivery_city, delivery_terms,
-        receiving_slot
-      )
-      VALUES (
-        $1,$2,$3,$4,$5,$6,$7,$8,
-        $9::jsonb,$10,$11,$12,$13::jsonb,$14::jsonb
-      )
-      RETURNING *`,
+         id, request_id, fingerprint,
+         customer_name, phone, fulfillment,
+         address, comment, items, total_rub,
+         tracking_token_hash,
+         delivery_city, delivery_terms,
+         receiving_slot
+       )
+       VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,
+         $9::jsonb,$10,$11,$12,$13::jsonb,$14::jsonb
+       )
+       RETURNING *`,
       [
         id,
         order.requestId,
@@ -1858,6 +2051,7 @@ async function saveOrder(order, trackingTokenHash) {
         trackingTokenHash,
         deliveryCity,
         JSON.stringify(deliveryInfo),
+
         receivingSlot
           ? JSON.stringify(receivingSlot)
           : null
@@ -1871,7 +2065,9 @@ async function saveOrder(order, trackingTokenHash) {
       created: true
     };
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
+    await client.query("ROLLBACK")
+      .catch(() => {});
+
     throw error;
   } finally {
     client.release();
@@ -1881,7 +2077,8 @@ async function saveOrder(order, trackingTokenHash) {
 // -------------------- TELEGRAM --------------------
 
 async function notifyTelegram(row) {
-  let notificationStatus = "not_configured";
+  let notificationStatus =
+    "not_configured";
 
   if (BOT_TOKEN && CHAT_ID) {
     const itemLines = row.items.map((item) => {
@@ -1894,8 +2091,11 @@ async function notifyTelegram(row) {
       );
     });
 
-    const deliveryInfo = storedDeliveryInfo(row);
-    const receivingSlot = storedReceivingSlot(row);
+    const deliveryInfo =
+      storedDeliveryInfo(row);
+
+    const receivingSlot =
+      storedReceivingSlot(row);
 
     const receivingLines =
       row.fulfillment === "pickup"
@@ -1905,7 +2105,13 @@ async function notifyTelegram(row) {
           ]
         : [
             "Получение: доставка",
-            `Город: ${row.delivery_city || "не выбран в приложении"}`,
+
+            "Город: " +
+            (
+              row.delivery_city ||
+              "не выбран в приложении"
+            ),
+
             `Адрес: ${row.address}`
           ];
 
@@ -1913,6 +2119,7 @@ async function notifyTelegram(row) {
       ? [
           `Дата и время: ${receivingSlot.label}`,
           "Время местное: UTC+3.",
+
           "Интервал выбран покупателем; " +
           "подтвердите возможность выполнения."
         ]
@@ -1935,24 +2142,32 @@ async function notifyTelegram(row) {
       `Товары: ${rub(row.total_rub)}`,
       deliveryInfo.message,
       "Оплата при получении.",
+
       row.comment
         ? `Комментарий: ${row.comment}`
         : ""
     ].join("\n");
 
     try {
-      for (let i = 0; i < message.length; i += 3500) {
+      for (
+        let i = 0;
+        i < message.length;
+        i += 3500
+      ) {
         const response = await fetch(
           `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
           {
             method: "POST",
+
             headers: {
               "Content-Type": "application/json"
             },
+
             body: JSON.stringify({
               chat_id: CHAT_ID,
               text: message.slice(i, i + 3500)
             }),
+
             signal: AbortSignal.timeout(12000)
           }
         );
@@ -1971,7 +2186,8 @@ async function notifyTelegram(row) {
       notificationStatus = "unconfirmed";
 
       console.error(
-        `Нет подтверждения Telegram: заказ № ${row.order_number}`
+        "Нет подтверждения Telegram: заказ №",
+        row.order_number
       );
     }
   }
@@ -1985,18 +2201,20 @@ async function notifyTelegram(row) {
     );
   } catch {
     console.error(
-      `Не обновлён статус уведомления: заказ № ${row.order_number}`
+      "Не обновлён статус уведомления: заказ №",
+      row.order_number
     );
   }
 
   return notificationStatus;
 }
 
-// -------------------- ПРОСМОТР ЗАКАЗА ПОКУПАТЕЛЕМ --------------------
+// -------------------- ПРОСМОТР ЗАКАЗА --------------------
 
 async function lookupCustomerOrder(data) {
   const id = data.id;
-  const accessToken = data.orderAccessToken;
+  const accessToken =
+    data.orderAccessToken;
 
   function unavailable() {
     return fail(
@@ -2056,10 +2274,16 @@ function decodeImage(data) {
   const base64 = data.base64;
 
   if (
-    !["image/jpeg", "image/png", "image/webp"]
-      .includes(mimeType)
+    ![
+      "image/jpeg",
+      "image/png",
+      "image/webp"
+    ].includes(mimeType)
   ) {
-    throw fail(400, "Поддерживаются JPG, PNG и WEBP.");
+    throw fail(
+      400,
+      "Поддерживаются JPG, PNG и WEBP."
+    );
   }
 
   if (
@@ -2076,7 +2300,8 @@ function decodeImage(data) {
     );
   }
 
-  const buffer = Buffer.from(base64, "base64");
+  const buffer =
+    Buffer.from(base64, "base64");
 
   if (
     buffer.length < 12 ||
@@ -2094,9 +2319,12 @@ function decodeImage(data) {
     buffer[1] === 0xd8 &&
     buffer[2] === 0xff;
 
-  const isPng = buffer.subarray(0, 8).equals(
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
-  );
+  const isPng =
+    buffer.subarray(0, 8).equals(
+      Buffer.from([
+        137, 80, 78, 71, 13, 10, 26, 10
+      ])
+    );
 
   const isWebp =
     buffer.toString("ascii", 0, 4) === "RIFF" &&
@@ -2138,24 +2366,35 @@ async function uploadImageToCloudinary(image) {
   const parameters = {
     folder: "lavka-vkusa/products",
     public_id: crypto.randomUUID(),
-    timestamp: String(Math.floor(Date.now() / 1000)),
+    timestamp: String(
+      Math.floor(Date.now() / 1000)
+    ),
+
     transformation:
       "c_limit,w_1200,h_1200/q_auto:good/f_jpg"
   };
 
-  const signatureSource = Object.keys(parameters)
-    .sort()
-    .map((key) => `${key}=${parameters[key]}`)
-    .join("&");
+  const signatureSource =
+    Object.keys(parameters)
+      .sort()
+      .map(
+        (key) => `${key}=${parameters[key]}`
+      )
+      .join("&");
 
   const signature = crypto
     .createHash("sha1")
-    .update(signatureSource + CLOUD_API_SECRET)
+    .update(
+      signatureSource + CLOUD_API_SECRET
+    )
     .digest("hex");
 
   const form = new FormData();
 
-  for (const [key, value] of Object.entries(parameters)) {
+  for (
+    const [key, value]
+    of Object.entries(parameters)
+  ) {
     form.append(key, value);
   }
 
@@ -2164,10 +2403,12 @@ async function uploadImageToCloudinary(image) {
 
   form.append(
     "file",
+
     new Blob(
       [image.buffer],
       { type: image.mimeType }
     ),
+
     `product.${extension}`
   );
 
@@ -2194,7 +2435,10 @@ async function uploadImageToCloudinary(image) {
     );
   }
 
-  if (!response.ok || !result.secure_url) {
+  if (
+    !response.ok ||
+    !result.secure_url
+  ) {
     if (
       response.status === 401 ||
       response.status === 403
@@ -2230,7 +2474,9 @@ async function uploadImageToCloudinary(image) {
     if (
       parsed.protocol !== "https:" ||
       parsed.hostname !== "res.cloudinary.com" ||
-      !parsed.pathname.startsWith(`/${CLOUD_NAME}/`) ||
+      !parsed.pathname.startsWith(
+        `/${CLOUD_NAME}/`
+      ) ||
       result.resource_type !== "image" ||
       result.format !== "jpg"
     ) {
@@ -2263,9 +2509,14 @@ async function handle(req, res) {
 
   const pathname = url.pathname;
 
+  // -------------------- СОСТОЯНИЕ СЕРВЕРА --------------------
+
   if (
     req.method === "GET" &&
-    (pathname === "/" || pathname === "/health")
+    (
+      pathname === "/" ||
+      pathname === "/health"
+    )
   ) {
     await pool.query("SELECT 1");
 
@@ -2273,18 +2524,32 @@ async function handle(req, res) {
       ok: true,
       store: "Лавка Вкуса",
       databaseConnected: true,
-      telegramConfigured: Boolean(BOT_TOKEN && CHAT_ID),
-      adminConfigured: ADMIN_TOKEN.length >= 32,
+
+      telegramConfigured:
+        Boolean(BOT_TOKEN && CHAT_ID),
+
+      adminConfigured:
+        ADMIN_TOKEN.length >= 32,
+
       orderNumbersEnabled: true,
-      imageUploadConfigured: cloudinaryConfigured(),
+
+      imageUploadConfigured:
+        cloudinaryConfigured(),
+
       quantityStepsEnabled: true,
       orderTrackingEnabled: true,
       promotionsEnabled: true,
       deliveryCitiesEnabled: true,
       schedulingEnabled: true,
-      scheduleTimeZone: STORE_TIME_ZONE
+      scheduleTimeZone: STORE_TIME_ZONE,
+
+      pushNotificationsEnabled: true,
+      firebaseConfigured: pushConfigured(),
+      pushQueueEnabled: true
     });
   }
+
+  // -------------------- ДОСТАВКА --------------------
 
   if (
     req.method === "GET" &&
@@ -2296,11 +2561,14 @@ async function handle(req, res) {
     });
   }
 
+  // -------------------- РАСПИСАНИЕ --------------------
+
   if (
     req.method === "GET" &&
     pathname === "/api/receiving-slots"
   ) {
-    const slots = await listSlots(url, false);
+    const slots =
+      await listSlots(url, false);
 
     return json(res, 200, {
       ok: true,
@@ -2309,18 +2577,23 @@ async function handle(req, res) {
     });
   }
 
+  // -------------------- КАТАЛОГ --------------------
+
   if (
     req.method === "GET" &&
     pathname === "/api/products"
   ) {
     const result = await pool.query(
-      `SELECT * FROM lv_products
+      `SELECT *
+       FROM lv_products
        WHERE available = TRUE
        ORDER BY sort_order, name`
     );
 
     return json(res, 200, {
-      products: result.rows.map(productView),
+      products:
+        result.rows.map(productView),
+
       promotionsEnabled: true,
       deliveryOptions: deliveryOptions(),
       scheduleOptions: scheduleOptions()
@@ -2340,22 +2613,82 @@ async function handle(req, res) {
 
     return json(res, 200, {
       categories:
-        result.rows.map((row) => row.category)
+        result.rows.map(
+          (row) => row.category
+        )
     });
   }
+
+  // -------------------- ПОДПИСКА НА PUSH --------------------
+
+  if (
+    req.method === "POST" &&
+    pathname === "/api/orders/push/subscribe"
+  ) {
+    const data = await readJson(req, 8192);
+
+    if (!pushConfigured()) {
+      throw fail(
+        503,
+        "Уведомления магазина пока не настроены. " +
+        "Статус заказа доступен в истории."
+      );
+    }
+
+    /*
+     * Подписка требует одновременно:
+     * - внутренний ID заказа;
+     * - секретный ключ просмотра заказа;
+     * - адрес устройства Firebase.
+     *
+     * Одного номера заказа недостаточно.
+     */
+    const result = await subscribeOrderPush(
+      pool,
+      data
+    );
+
+    return json(res, 200, {
+      ok: true,
+      ...result
+    });
+  }
+
+  if (
+    req.method === "POST" &&
+    pathname === "/api/orders/push/unsubscribe"
+  ) {
+    const data = await readJson(req, 8192);
+
+    const result = await unsubscribeOrderPush(
+      pool,
+      data
+    );
+
+    return json(res, 200, {
+      ok: true,
+      ...result
+    });
+  }
+
+  // -------------------- ПРОСМОТР ЗАКАЗА --------------------
 
   if (
     req.method === "POST" &&
     pathname === "/api/orders/lookup"
   ) {
     const data = await readJson(req, 4096);
-    const order = await lookupCustomerOrder(data);
+
+    const order =
+      await lookupCustomerOrder(data);
 
     return json(res, 200, {
       ok: true,
       order
     });
   }
+
+  // -------------------- СОЗДАНИЕ ЗАКАЗА --------------------
 
   if (
     req.method === "POST" &&
@@ -2366,7 +2699,8 @@ async function handle(req, res) {
     const trackingTokenHash =
       accessTokenHashFromInput(data);
 
-    const order = normalizeOrder(data);
+    const order =
+      normalizeOrder(data);
 
     const saved = await saveOrder(
       order,
@@ -2387,16 +2721,25 @@ async function handle(req, res) {
       {
         ok: true,
         id: saved.row.id,
-        orderNumber: Number(saved.row.order_number),
-        totalRub: Number(saved.row.total_rub),
+
+        orderNumber:
+          Number(saved.row.order_number),
+
+        totalRub:
+          Number(saved.row.total_rub),
+
         status: saved.row.status,
         telegramStatus,
+
         deliveryCity:
           saved.row.delivery_city || "",
+
         deliveryInfo:
           storedDeliveryInfo(saved.row),
+
         receivingSlot:
           storedReceivingSlot(saved.row),
+
         orderTrackingAvailable: Boolean(
           trackingTokenHash &&
           sameHash(
@@ -2404,24 +2747,38 @@ async function handle(req, res) {
             trackingTokenHash
           )
         ),
-        message: "Заказ сохранён в магазине."
+
+        pushNotificationsEnabled: true,
+
+        message:
+          "Заказ сохранён в магазине."
       }
     );
   }
 
+  // -------------------- СТРАНИЦА АДМИНКИ --------------------
+
   if (
     req.method === "GET" &&
-    (pathname === "/admin" || pathname === "/admin/")
+    (
+      pathname === "/admin" ||
+      pathname === "/admin/"
+    )
   ) {
     let html;
 
     try {
       html = await fs.readFile(
-        path.join(__dirname, "admin.html"),
+        path.join(
+          __dirname,
+          "admin.html"
+        ),
         "utf8"
       );
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
 
       throw fail(
         404,
@@ -2430,7 +2787,9 @@ async function handle(req, res) {
     }
 
     res.writeHead(200, {
-      "Content-Type": "text/html; charset=utf-8",
+      "Content-Type":
+        "text/html; charset=utf-8",
+
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
@@ -2440,8 +2799,12 @@ async function handle(req, res) {
     return res.end(html);
   }
 
+  // -------------------- ЗАЩИЩЁННЫЙ API --------------------
+
   if (pathname.startsWith("/api/admin/")) {
     checkAdmin(req);
+
+    // -------------------- НАСТРОЙКИ АДМИНКИ --------------------
 
     if (
       req.method === "GET" &&
@@ -2450,28 +2813,43 @@ async function handle(req, res) {
       return json(res, 200, {
         imageUploadConfigured:
           cloudinaryConfigured(),
+
         maxImageBytes: MAX_IMAGE_BYTES,
+
         allowedImageTypes: [
           "image/jpeg",
           "image/png",
           "image/webp"
         ],
+
         quantityStepsEnabled: true,
         orderTrackingEnabled: true,
         promotionsEnabled: true,
         oldPriceField: "oldPriceRub",
         deliveryCitiesEnabled: true,
-        deliveryOptions: deliveryOptions(),
+
+        deliveryOptions:
+          deliveryOptions(),
+
         schedulingEnabled: true,
-        scheduleOptions: scheduleOptions()
+
+        scheduleOptions:
+          scheduleOptions(),
+
+        pushNotificationsEnabled: true,
+        firebaseConfigured: pushConfigured(),
+        pushQueueEnabled: true
       });
     }
+
+    // -------------------- РАСПИСАНИЕ АДМИНКИ --------------------
 
     if (
       req.method === "GET" &&
       pathname === "/api/admin/receiving-slots"
     ) {
-      const slots = await listSlots(url, true);
+      const slots =
+        await listSlots(url, true);
 
       return json(res, 200, {
         ok: true,
@@ -2484,8 +2862,13 @@ async function handle(req, res) {
       req.method === "POST" &&
       pathname === "/api/admin/receiving-slots"
     ) {
-      const data = await readJson(req, 4096);
-      const slot = await createSlot(data);
+      const data = await readJson(
+        req,
+        4096
+      );
+
+      const slot =
+        await createSlot(data);
 
       return json(res, 201, {
         ok: true,
@@ -2510,17 +2893,23 @@ async function handle(req, res) {
         );
       }
 
-      const data = await readJson(req, 4096);
+      const data = await readJson(
+        req,
+        4096
+      );
 
-      const slot = req.method === "PUT"
-        ? await updateSlot(id, data)
-        : await setSlotEnabled(id, data);
+      const slot =
+        req.method === "PUT"
+          ? await updateSlot(id, data)
+          : await setSlotEnabled(id, data);
 
       return json(res, 200, {
         ok: true,
         slot
       });
     }
+
+    // -------------------- ЗАГРУЗКА ФОТО --------------------
 
     if (
       req.method === "POST" &&
@@ -2542,14 +2931,18 @@ async function handle(req, res) {
           MAX_UPLOAD_BODY_BYTES
         );
 
-        const image = decodeImage(data);
+        const image =
+          decodeImage(data);
 
         const uploaded =
-          await uploadImageToCloudinary(image);
+          await uploadImageToCloudinary(
+            image
+          );
 
         return json(res, 201, {
           ok: true,
           ...uploaded,
+
           message:
             "Фотография загружена. " +
             "Сохраните товар, чтобы привязать её к каталогу."
@@ -2559,17 +2952,22 @@ async function handle(req, res) {
       }
     }
 
+    // -------------------- ТОВАРЫ АДМИНКИ --------------------
+
     if (
       req.method === "GET" &&
       pathname === "/api/admin/products"
     ) {
       const result = await pool.query(
-        `SELECT * FROM lv_products
+        `SELECT *
+         FROM lv_products
          ORDER BY sort_order, name`
       );
 
       return json(res, 200, {
-        products: result.rows.map(productView),
+        products:
+          result.rows.map(productView),
+
         promotionsEnabled: true
       });
     }
@@ -2578,8 +2976,11 @@ async function handle(req, res) {
       req.method === "POST" &&
       pathname === "/api/admin/products"
     ) {
-      const data = await readJson(req);
-      const product = await createProduct(data);
+      const data =
+        await readJson(req);
+
+      const product =
+        await createProduct(data);
 
       return json(res, 201, {
         ok: true,
@@ -2595,18 +2996,22 @@ async function handle(req, res) {
       req.method === "PUT" &&
       productMatch
     ) {
-      const data = await readJson(req);
+      const data =
+        await readJson(req);
 
-      const product = await updateProduct(
-        productMatch[1],
-        data
-      );
+      const product =
+        await updateProduct(
+          productMatch[1],
+          data
+        );
 
       return json(res, 200, {
         ok: true,
         product
       });
     }
+
+    // -------------------- СПИСОК ЗАКАЗОВ --------------------
 
     if (
       req.method === "GET" &&
@@ -2626,18 +3031,26 @@ async function handle(req, res) {
       const pageSize = 50;
 
       const result = await pool.query(
-        `SELECT * FROM lv_orders
+        `SELECT *
+         FROM lv_orders
          ORDER BY created_at DESC, id DESC
          LIMIT $1 OFFSET $2`,
-        [pageSize, (page - 1) * pageSize]
+        [
+          pageSize,
+          (page - 1) * pageSize
+        ]
       );
 
       return json(res, 200, {
-        orders: result.rows.map(orderView),
+        orders:
+          result.rows.map(orderView),
+
         page,
         pageSize
       });
     }
+
+    // -------------------- СТАТУС И PUSH --------------------
 
     const statusMatch = pathname.match(
       /^\/api\/admin\/orders\/(LV-[0-9a-f-]{36})\/status$/
@@ -2656,30 +3069,37 @@ async function handle(req, res) {
         );
       }
 
-      const data = await readJson(req, 4096);
+      const data = await readJson(
+        req,
+        4096
+      );
 
-      if (!ORDER_STATUSES.includes(data.status)) {
+      if (
+        !ORDER_STATUSES.includes(data.status)
+      ) {
         throw fail(
           400,
           "Некорректный статус заказа."
         );
       }
 
-      const result = await pool.query(
-        `UPDATE lv_orders
-         SET status = $2, updated_at = NOW()
-         WHERE id = $1
-         RETURNING *`,
-        [id, data.status]
-      );
-
-      if (!result.rows.length) {
-        throw fail(404, "Заказ не найден.");
-      }
+      /*
+       * Статус и задания на уведомления
+       * сохраняются одной транзакцией.
+       *
+       * Ошибка Firebase не отменяет изменение
+       * статуса и не задерживает ответ админке.
+       */
+      const order =
+        await changeOrderStatusWithPush(
+          pool,
+          id,
+          data.status
+        );
 
       return json(res, 200, {
         ok: true,
-        order: orderView(result.rows[0])
+        order: orderView(order)
       });
     }
   }
@@ -2687,47 +3107,55 @@ async function handle(req, res) {
   throw fail(404, "Страница не найдена.");
 }
 
-// -------------------- ЗАПУСК СЕРВЕРА --------------------
+// -------------------- HTTP-СЕРВЕР --------------------
 
-const server = http.createServer((req, res) => {
-  handle(req, res).catch((error) => {
-    if (res.destroyed || res.writableEnded) return;
+const server = http.createServer(
+  (req, res) => {
+    handle(req, res).catch((error) => {
+      if (
+        res.destroyed ||
+        res.writableEnded
+      ) {
+        return;
+      }
 
-    if (res.headersSent) {
-      res.destroy();
-      return;
-    }
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
 
-    const status =
-      Number.isInteger(error.status) &&
-      error.status >= 400 &&
-      error.status <= 599
-        ? error.status
-        : 500;
+      const status =
+        Number.isInteger(error.status) &&
+        error.status >= 400 &&
+        error.status <= 599
+          ? error.status
+          : 500;
 
-    if (status === 500) {
-      const code =
-        typeof error.code === "string"
-          ? error.code
-          : "UNKNOWN";
+      if (status === 500) {
+        const code =
+          typeof error.code === "string"
+            ? error.code
+            : "UNKNOWN";
 
-      console.error(
-        "Ошибка обработки запроса. Код:",
-        code
-      );
-    }
+        console.error(
+          "Ошибка обработки запроса. Код:",
+          code
+        );
+      }
 
-    json(res, status, {
-      ok: false,
-      error:
-        status === 500
-          ? "Ошибка сервера. Если вы отправляли заказ, " +
-            "его результат пока не подтверждён. " +
-            "Повторите отправку того же сохранённого заказа."
-          : error.message
+      json(res, status, {
+        ok: false,
+
+        error:
+          status === 500
+            ? "Ошибка сервера. Если вы отправляли заказ, " +
+              "его результат пока не подтверждён. " +
+              "Повторите отправку того же сохранённого заказа."
+            : error.message
+      });
     });
-  });
-});
+  }
+);
 
 server.requestTimeout = 60000;
 server.headersTimeout = 15000;
@@ -2742,53 +3170,98 @@ server.on("error", (error) => {
   process.exit(1);
 });
 
+// -------------------- ЗАПУСК --------------------
+
 async function start() {
   try {
     await initializeDatabase();
 
-    server.listen(PORT, "0.0.0.0", () => {
-      console.log(
-        `Лавка Вкуса: сервер запущен на порту ${PORT}`
-      );
+    // Добавляет только новые таблицы для push.
+    await initializeOrderPush(pool);
 
-      console.log(
-        "Акции, города и интервалы получения включены."
-      );
-    });
+    pushWorker =
+      startOrderPushWorker(pool);
+
+    server.listen(
+      PORT,
+      "0.0.0.0",
+      () => {
+        console.log(
+          "Лавка Вкуса: сервер запущен на порту",
+          PORT
+        );
+
+        console.log(
+          "Акции, города и интервалы получения включены."
+        );
+
+        console.log(
+          "Настройки Firebase:",
+          pushConfigured()
+            ? "обнаружены"
+            : "отсутствуют или некорректны"
+        );
+      }
+    );
   } catch (error) {
     console.error(
-      "Не удалось подготовить базу данных. Код:",
+      "Не удалось подготовить сервер. Код:",
       error.code || "UNKNOWN"
     );
 
-    await pool.end().catch(() => {});
+    if (pushWorker) {
+      await pushWorker.stop()
+        .catch(() => {});
+    }
+
+    await pool.end()
+      .catch(() => {});
+
     process.exit(1);
   }
 }
 
+// -------------------- ОСТАНОВКА --------------------
+
 let shuttingDown = false;
 
 function shutdown() {
-  if (shuttingDown) return;
+  if (shuttingDown) {
+    return;
+  }
+
   shuttingDown = true;
 
-  const timer = setTimeout(() => {
-    process.exit(1);
-  }, 25000);
+  const timer = setTimeout(
+    () => {
+      /*
+       * Если отправка была прервана,
+       * задание останется в базе.
+       * После истечения блокировки обработчик
+       * сможет повторить попытку.
+       */
+      process.exit(1);
+    },
+    25000
+  );
 
   timer.unref();
 
-  server.close(() => {
-    pool.end().then(
-      () => {
-        clearTimeout(timer);
-        process.exit(0);
-      },
-      () => {
-        clearTimeout(timer);
-        process.exit(1);
-      }
-    );
+  const workerStopped = pushWorker
+    ? pushWorker.stop()
+    : Promise.resolve();
+
+  server.close(async () => {
+    try {
+      await workerStopped;
+      await pool.end();
+
+      clearTimeout(timer);
+      process.exit(0);
+    } catch {
+      clearTimeout(timer);
+      process.exit(1);
+    }
   });
 }
 
