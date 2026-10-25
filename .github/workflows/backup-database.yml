@@ -33,7 +33,7 @@ jobs:
           fi
 
           if [[ "${#BACKUP_PASSWORD}" -lt 32 ]]; then
-            echo "::error::Секрет BACKUP_PASSWORD должен содержать не менее 32 символов."
+            echo "::error::BACKUP_PASSWORD должен содержать не менее 32 символов."
             exit 1
           fi
 
@@ -41,7 +41,7 @@ jobs:
             postgresql://*|postgres://*)
               ;;
             *)
-              echo "::error::BACKUP_DATABASE_URL должен содержать полный внешний адрес PostgreSQL."
+              echo "::error::Нужен полный External Database URL из Render."
               exit 1
               ;;
           esac
@@ -64,15 +64,19 @@ jobs:
           echo "Подготавливаем PostgreSQL 18..."
           docker pull postgres:18
 
-          echo "Создаём согласованную копию базы..."
+          echo "Создаём копию базы Render..."
+
           docker run --rm \
             --env PGDATABASE \
+            --env PGSSLMODE=require \
+            --env PGCONNECT_TIMEOUT=30 \
             postgres:18 \
-            pg_dump \
+            sh -c 'exec pg_dump \
+              --dbname="$PGDATABASE" \
               --format=custom \
               --no-owner \
-              --no-acl \
-              > "$PLAIN_FILE"
+              --no-acl' \
+            > "$PLAIN_FILE"
 
           if [[ ! -s "$PLAIN_FILE" ]]; then
             echo "::error::Резервная копия оказалась пустой."
@@ -80,6 +84,7 @@ jobs:
           fi
 
           echo "Проверяем структуру архива..."
+
           docker run --rm -i \
             postgres:18 \
             pg_restore --list \
@@ -87,6 +92,7 @@ jobs:
             > /dev/null
 
           echo "Шифруем резервную копию..."
+
           gpg \
             --batch \
             --yes \
@@ -99,7 +105,8 @@ jobs:
             "$PLAIN_FILE" \
             3<<<"$BACKUP_PASSWORD"
 
-          echo "Проверяем расшифровку и совпадение содержимого..."
+          echo "Проверяем расшифровку..."
+
           gpg \
             --batch \
             --yes \
@@ -111,7 +118,7 @@ jobs:
             3<<<"$BACKUP_PASSWORD" \
             | cmp -- "$PLAIN_FILE" -
 
-          echo "Проверки завершены. Подготовлен зашифрованный архив."
+          echo "Зашифрованная копия подготовлена и проверена."
 
       - name: Save encrypted backup
         uses: actions/upload-artifact@v4
