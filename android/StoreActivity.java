@@ -24,6 +24,8 @@ import java.security.SecureRandom;
 import java.text.DateFormat;
 import java.text.NumberFormat;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.*;
 
 public class StoreActivity extends Activity {
@@ -44,49 +46,49 @@ public class StoreActivity extends Activity {
             "Донецку и Харцызску. Другие города и заказы " +
             "до 2 000 ₽ — по согласованию.";
 
-    private static final long FREE_DELIVERY_THRESHOLD_KOPECKS =
-            200000L;
-
-    private static final String[] DELIVERY_CITIES = {
-            "Макеевка",
-            "Донецк",
-            "Харцызск",
-            "Другой город"
-    };
+    private static final long FREE_THRESHOLD = 200000L;
+    private static final long MAX_TOTAL = 1000000000L;
 
     private static final String CITY_PREF =
             "customer_delivery_city";
 
+    private static final String OTHER_CITY_PREF =
+            "customer_other_city";
+
     private static final String HISTORY_KEY =
             "orders_history_v1";
 
-    private static final String ORDER_ID_PATTERN =
+    private static final String ORDER_PATTERN =
             "LV-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-" +
             "[0-9a-f]{4}-[0-9a-f]{12}";
 
-    private final String[] tabs = {
+    private static final String SLOT_PATTERN =
+            "slot-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-" +
+            "[0-9a-f]{4}-[0-9a-f]{12}";
+
+    private static final String[] CITIES = {
+            "Макеевка", "Донецк", "Харцызск", "Другой город"
+    };
+
+    private static final String[] TABS = {
             "Главная", "Каталог", "Избранное", "Корзина", "Профиль"
     };
 
-    private final String[] tabIcons = {
+    private static final String[] ICONS = {
             "⌂", "☰", "♡", "▣", "◉"
     };
 
     private final List<Product> products = new ArrayList<>();
+    private final List<Slot> slots = new ArrayList<>();
 
     /*
-     * Количество хранится в половинах:
-     * 1 = 0,5 кг.
-     * 2 = 1 кг или 1 шт/уп.
+     * Количество в половинах:
+     * 1 = 0,5 кг; 2 = 1 кг или 1 шт/уп.
      */
-    private final Map<String, Integer> cartHalves =
-            new HashMap<>();
-
+    private final Map<String, Integer> cart = new HashMap<>();
     private Set<String> favorites = new HashSet<>();
-    private JSONArray orderHistory = new JSONArray();
-
-    private final Set<String> refreshingOrders =
-            new HashSet<>();
+    private JSONArray history = new JSONArray();
+    private final Set<String> refreshing = new HashSet<>();
 
     private final NumberFormat moneyFormat =
             NumberFormat.getNumberInstance(new Locale("ru", "RU"));
@@ -94,71 +96,105 @@ public class StoreActivity extends Activity {
     private final NumberFormat quantityFormat =
             NumberFormat.getNumberInstance(new Locale("ru", "RU"));
 
-    private ShopApi api;
     private SharedPreferences prefs;
-
+    private ShopApi api;
+    private ScrollView scroll;
     private LinearLayout content;
     private LinearLayout navigation;
-    private ScrollView scroll;
 
     private EditText nameInput;
     private EditText phoneInput;
     private EditText addressInput;
     private EditText commentInput;
+    private EditText otherCityInput;
 
     private String customerName = "";
     private String customerPhone = "";
     private String customerAddress = "";
     private String customerComment = "";
-    private String deliveryCity = "";
+    private String city = "";
+    private String otherCity = "";
 
     private String category = "";
     private String search = "";
-    private String pendingOrder;
-    private String repeatingOrderId;
+    private String pending;
+    private String repeatingId;
+    private String selectedSlotId = "";
+    private Slot selectedSlotSnapshot;
 
-    private int currentTab = 0;
-
+    private int tab = 0;
     private boolean delivery = true;
     private boolean consent = false;
     private boolean freshCatalog = false;
-    private boolean loading = false;
+    private boolean loadingCatalog = false;
+    private boolean loadingSlots = false;
+    private boolean slotsLoaded = false;
+    private boolean preparing = false;
     private boolean sending = false;
     private boolean destroyed = false;
     private boolean showingHistory = false;
     private boolean historyReadable = true;
     private boolean promotionsOnly = false;
+    private String scheduleError = "";
 
     private static class Product {
-        String id;
-        String name;
-        String category;
-        String description;
-        String unit;
-        String imageUrl;
-        int price;
-        int oldPrice;
+        String id, name, category, description, unit, imageUrl;
+        int price, oldPrice;
 
-        boolean hasPromotion() {
+        boolean promotion() {
             return oldPrice > price && price > 0;
         }
 
-        int discountPercent() {
-            if (!hasPromotion()) return 0;
-            return (int) (
-                    ((long) oldPrice - price) * 100L / oldPrice
+        int discount() {
+            return promotion()
+                    ? (int) (((long) oldPrice - price) * 100 / oldPrice)
+                    : 0;
+        }
+    }
+
+    private static class Slot {
+        String id, date, start, end, fulfillment;
+
+        String label() {
+            LocalDate d = LocalDate.parse(date);
+            return String.format(
+                    Locale.ROOT,
+                    "%02d.%02d.%04d, %s–%s",
+                    d.getDayOfMonth(),
+                    d.getMonthValue(),
+                    d.getYear(),
+                    start,
+                    end
             );
+        }
+
+        JSONObject json() throws Exception {
+            JSONObject result = new JSONObject();
+            result.put("id", id);
+            result.put("date", date);
+            result.put("startTime", start);
+            result.put("endTime", end);
+            result.put("fulfillment", fulfillment);
+            result.put("timeZone", "Europe/Moscow");
+            result.put("label", label());
+            return result;
+        }
+
+        boolean same(Slot other) {
+            return other != null &&
+                    id.equals(other.id) &&
+                    date.equals(other.date) &&
+                    start.equals(other.start) &&
+                    end.equals(other.end) &&
+                    fulfillment.equals(other.fulfillment);
         }
     }
 
     private static class RepeatPlan {
-        final Map<String, Integer> quantities =
-                new LinkedHashMap<>();
-
+        final Map<String, Integer> quantities = new LinkedHashMap<>();
         final List<String> included = new ArrayList<>();
         final List<String> skipped = new ArrayList<>();
-
-        long totalKopecks = 0;
+        long total;
     }
 
     @Override
@@ -167,21 +203,18 @@ public class StoreActivity extends Activity {
 
         moneyFormat.setMinimumFractionDigits(2);
         moneyFormat.setMaximumFractionDigits(2);
-
-        quantityFormat.setMinimumFractionDigits(0);
         quantityFormat.setMaximumFractionDigits(1);
 
         getWindow().setStatusBarColor(BLACK);
         getWindow().setNavigationBarColor(BLACK);
         getWindow().getDecorView().setSystemUiVisibility(0);
-
         getWindow().setSoftInputMode(
                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         );
 
         prefs = getPreferences(MODE_PRIVATE);
         api = new ShopApi();
-        restoreData();
+        restore();
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -189,12 +222,10 @@ public class StoreActivity extends Activity {
 
         scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setClipToPadding(false);
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(16), dp(18), dp(16), dp(24));
-
         scroll.addView(content);
 
         root.addView(
@@ -203,7 +234,6 @@ public class StoreActivity extends Activity {
         );
 
         navigation = new LinearLayout(this);
-        navigation.setOrientation(LinearLayout.HORIZONTAL);
         navigation.setBackgroundColor(CARD);
         navigation.setPadding(dp(3), dp(6), dp(3), dp(6));
 
@@ -215,19 +245,19 @@ public class StoreActivity extends Activity {
         setContentView(root);
         render(false);
         loadCatalog();
+        loadSlots();
     }
 
-    private void restoreData() {
+    private void restore() {
         customerName = prefs.getString("customer_name", "");
         customerPhone = prefs.getString("customer_phone", "");
         customerAddress = prefs.getString("customer_address", "");
-
+        otherCity = prefs.getString(OTHER_CITY_PREF, "");
         delivery = prefs.getBoolean("delivery", true);
-        pendingOrder = prefs.getString("pending_order", null);
+        pending = prefs.getString("pending_order", null);
 
         String savedCity = prefs.getString(CITY_PREF, "");
-        deliveryCity = knownDeliveryCity(savedCity)
-                ? savedCity : "";
+        city = knownCity(savedCity) ? savedCity : "";
 
         favorites = new HashSet<>(
                 prefs.getStringSet(
@@ -240,21 +270,18 @@ public class StoreActivity extends Activity {
             JSONObject saved = new JSONObject(
                     prefs.getString("cart_v2", "{}")
             );
-
             Iterator<String> keys = saved.keys();
 
             while (keys.hasNext()) {
                 String id = keys.next();
-                double value = saved.optDouble(id, 0);
-                double halves = value * 2;
+                double q = saved.getDouble(id);
 
                 if (
-                        Double.isFinite(value) &&
-                        value >= 0.5 &&
-                        value <= 50 &&
-                        halves == Math.rint(halves)
+                        Double.isFinite(q) &&
+                        q >= 0.5 && q <= 50 &&
+                        q * 2 == Math.rint(q * 2)
                 ) {
-                    cartHalves.put(id, (int) halves);
+                    cart.put(id, (int) (q * 2));
                 }
             }
         } catch (Exception ignored) {
@@ -264,38 +291,34 @@ public class StoreActivity extends Activity {
             JSONArray saved = new JSONArray(
                     prefs.getString(HISTORY_KEY, "[]")
             );
-
             Set<String> ids = new HashSet<>();
 
             for (int i = 0; i < saved.length(); i++) {
-                JSONObject item = saved.getJSONObject(i);
-                String id = item.getString("id");
+                String id = saved.getJSONObject(i).getString("id");
 
-                if (
-                        !id.matches(ORDER_ID_PATTERN) ||
-                        !ids.add(id)
-                ) {
+                if (!id.matches(ORDER_PATTERN) || !ids.add(id)) {
                     throw new Exception("Некорректная история");
                 }
             }
 
-            orderHistory = saved;
-
+            history = saved;
         } catch (Exception error) {
-            /*
-             * Повреждённую исходную историю не удаляем
-             * и не перезаписываем новой.
-             */
             historyReadable = false;
-            orderHistory = new JSONArray();
+            history = new JSONArray();
         }
     }
 
+    // -------------------- ОБЩИЕ ФУНКЦИИ --------------------
+
     private int dp(int value) {
         return Math.round(
-                value *
-                getResources().getDisplayMetrics().density
+                value * getResources().getDisplayMetrics().density
         );
+    }
+
+    private String str(JSONObject object, String key) {
+        return object.has(key) && !object.isNull(key)
+                ? object.optString(key, "").trim() : "";
     }
 
     private String money(long kopecks) {
@@ -304,517 +327,240 @@ public class StoreActivity extends Activity {
         ) + " ₽";
     }
 
-    private long responseKopecks(
-            JSONObject data
-    ) throws Exception {
-        long value = new BigDecimal(
-                data.get("totalRub").toString()
+    private long responseKopecks(JSONObject object) throws Exception {
+        long result = new BigDecimal(
+                object.get("totalRub").toString()
         ).movePointRight(2).longValueExact();
 
-        if (value <= 0 || value > 1000000000L) {
+        if (result <= 0 || result > MAX_TOTAL) {
             throw new Exception("Некорректная сумма");
         }
-
-        return value;
+        return result;
     }
 
-    private String orderMoney(JSONObject order) {
+    private String orderMoney(JSONObject object) {
         try {
-            return money(responseKopecks(order));
+            return money(responseKopecks(object));
         } catch (Exception error) {
             return "Сумма уточняется";
         }
     }
 
-    private String normalizedUnit(String value) {
+    private String unit(String value) {
         return value == null
-                ? ""
-                : value.trim().toLowerCase(Locale.ROOT);
+                ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
-    private boolean isKilogram(Product product) {
-        return "кг".equals(normalizedUnit(product.unit));
+    private boolean kg(Product p) {
+        return "кг".equals(unit(p.unit));
     }
 
-    private boolean supportedUnit(String unit) {
-        return Arrays.asList("кг", "шт", "уп")
-                .contains(normalizedUnit(unit));
-    }
-
-    private String quantityText(
-            Product product,
-            int halves
-    ) {
-        return quantityFormat.format(halves / 2.0)
-                + " " + product.unit;
-    }
-
-    private String stepText(Product product) {
-        return isKilogram(product)
-                ? "Шаг выбора — 500 г"
-                : "Шаг выбора — 1 " + product.unit;
+    private boolean supportedUnit(String value) {
+        return Arrays.asList("кг", "шт", "уп").contains(unit(value));
     }
 
     private int halves(String id) {
-        Integer value = cartHalves.get(id);
+        Integer value = cart.get(id);
         return value == null ? 0 : value;
     }
 
-    private long lineKopecks(Product product) {
-        return (long) product.price *
-                50L * halves(product.id);
+    private String quantity(Product p, int halves) {
+        return quantityFormat.format(halves / 2.0) + " " + p.unit;
     }
 
-    private long totalKopecks() {
-        long sum = 0;
+    private long lineTotal(Product p) {
+        return (long) p.price * 50L * halves(p.id);
+    }
 
-        for (Product product : products) {
-            sum += lineKopecks(product);
+    private long total() {
+        long result = 0;
+        for (Product p : products) result += lineTotal(p);
+        return result;
+    }
+
+    private Product findProduct(String id) {
+        for (Product p : products) {
+            if (p.id.equals(id)) return p;
+        }
+        return null;
+    }
+
+    private boolean busyCart() {
+        return sending || preparing || pending != null ||
+                repeatingId != null;
+    }
+
+    private boolean knownCity(String value) {
+        return Arrays.asList(CITIES).contains(value);
+    }
+
+    private boolean freeCity(String value) {
+        return Arrays.asList(
+                "Макеевка", "Донецк", "Харцызск"
+        ).contains(value);
+    }
+
+    private String actualCity() {
+        return "Другой город".equals(city)
+                ? otherCity.trim().replaceAll("\\s+", " ")
+                : city;
+    }
+
+    private String deliveryHint(String selected, long sum) {
+        if (selected == null || selected.isEmpty()) {
+            return "Выберите город доставки.";
         }
 
-        return sum;
-    }
-
-    private boolean repeating() {
-        return repeatingOrderId != null;
-    }
-
-    // -------------------- ГОРОДА И ДОСТАВКА --------------------
-
-    private boolean knownDeliveryCity(String city) {
-        if (city == null) return false;
-
-        for (String value : DELIVERY_CITIES) {
-            if (value.equals(city)) return true;
-        }
-
-        return false;
-    }
-
-    private boolean freeDeliveryCity(String city) {
-        return "Макеевка".equals(city) ||
-                "Донецк".equals(city) ||
-                "Харцызск".equals(city);
-    }
-
-    private String selectedCityTitle() {
-        return knownDeliveryCity(deliveryCity)
-                ? deliveryCity
-                : "Выберите город";
-    }
-
-    /*
-     * Подсказка относится к товарам в текущей корзине.
-     * Платная доставка автоматически не прибавляется.
-     */
-    private String deliveryHint(
-            String city,
-            long total,
-            boolean actualCatalog
-    ) {
-        if (!knownDeliveryCity(city)) {
-            return "Выберите город, чтобы увидеть условия доставки.";
-        }
-
-        if (!freeDeliveryCity(city)) {
+        if (!freeCity(selected)) {
             return "Возможность и стоимость доставки " +
-                    "согласует магазин.\n" +
-                    "Укажите название вашего города в полном адресе.";
+                    "согласует магазин.";
         }
 
-        if (!actualCatalog) {
-            return "Для города «" + city + "» бесплатная доставка " +
-                    "доступна от 2 000 ₽.\n" +
-                    "Обновите каталог для расчёта по актуальным ценам.";
+        if (!freshCatalog || loadingCatalog) {
+            return "Бесплатная доставка от 2 000 ₽. " +
+                    "Обновите каталог для актуального расчёта.";
         }
 
-        if (total >= FREE_DELIVERY_THRESHOLD_KOPECKS) {
-            return "Доставка бесплатно\n" +
-                    "Город: " + city +
-                    ". Товары в корзине — от 2 000 ₽.";
-        }
-
-        return "До бесплатной доставки осталось " +
-                money(FREE_DELIVERY_THRESHOLD_KOPECKS - total) +
-                "\nГород: " + city +
-                ". Для меньшей суммы условия согласует магазин.";
+        return sum >= FREE_THRESHOLD
+                ? "Доставка по городу " + selected + " — бесплатно."
+                : "До бесплатной доставки осталось " +
+                  money(FREE_THRESHOLD - sum) +
+                  ". Стоимость доставки меньшего заказа " +
+                  "согласует магазин.";
     }
 
-    private void updateDeliveryHint(TextView hint) {
-        hint.setText(
-                deliveryHint(
-                        deliveryCity,
-                        totalKopecks(),
-                        freshCatalog && !loading
-                )
-        );
-
-        hint.setTextColor(
-                freeDeliveryCity(deliveryCity) &&
-                freshCatalog &&
-                !loading &&
-                totalKopecks() >= FREE_DELIVERY_THRESHOLD_KOPECKS
-                        ? GOLD : MUTED
-        );
+    private String fulfillment() {
+        return delivery ? "delivery" : "pickup";
     }
 
-    private void chooseDeliveryCity(
-            Button selector,
-            TextView hint
-    ) {
-        if (destroyed || isFinishing()) return;
+    // -------------------- ОФОРМЛЕНИЕ ЭКРАНОВ --------------------
 
-        int checked = -1;
-
-        for (int i = 0; i < DELIVERY_CITIES.length; i++) {
-            if (DELIVERY_CITIES[i].equals(deliveryCity)) {
-                checked = i;
-                break;
-            }
-        }
-
-        AlertDialog dialog = dialogBuilder()
-                .setTitle("Город доставки")
-                .setSingleChoiceItems(
-                        DELIVERY_CITIES,
-                        checked,
-                        (d, which) -> {
-                            deliveryCity = DELIVERY_CITIES[which];
-
-                            selector.setText(
-                                    "Город: " + selectedCityTitle()
-                            );
-
-                            updateDeliveryHint(hint);
-                            saveProfile();
-                            d.dismiss();
-                        }
-                )
-                .setNegativeButton("Отмена", null)
-                .create();
-
-        dialog.show();
-        decorateDialog(dialog);
+    private GradientDrawable background(int color, boolean border) {
+        GradientDrawable result = new GradientDrawable();
+        result.setColor(color);
+        result.setCornerRadius(dp(18));
+        if (border) result.setStroke(dp(1), GOLD);
+        return result;
     }
 
-    private void addCitySelector(
-            LinearLayout parent
-    ) {
-        parent.addView(bold(
-                "Город доставки",
-                16,
-                WHITE
-        ));
-
-        Button selector = secondary(
-                "Город: " + selectedCityTitle(),
-                () -> { }
-        );
-
-        parent.addView(selector);
-
-        TextView hint = text("", 14, MUTED);
-        parent.addView(hint);
-
-        updateDeliveryHint(hint);
-
-        selector.setOnClickListener(
-                v -> chooseDeliveryCity(selector, hint)
-        );
+    private TextView text(String value, int size, int color) {
+        TextView result = new TextView(this);
+        result.setText(value);
+        result.setTextSize(size);
+        result.setTextColor(color);
+        result.setPadding(0, dp(4), 0, dp(4));
+        result.setLineSpacing(dp(2), 1);
+        return result;
     }
 
-    private String receivingDescription(JSONObject order) {
-        if ("pickup".equals(order.optString("fulfillment"))) {
-            return "Самовывоз:\n" + PICKUP;
-        }
-
-        String city = stringValue(order, "deliveryCity");
-        String address = stringValue(order, "address");
-
-        return "Доставка:\n" +
-                (city.isEmpty()
-                        ? ""
-                        : "Город: " + city + "\n") +
-                address;
+    private TextView bold(String value, int size, int color) {
+        TextView result = text(value, size, color);
+        result.setTypeface(null, Typeface.BOLD);
+        return result;
     }
 
-    // -------------------- ОФОРМЛЕНИЕ --------------------
-
-    private GradientDrawable background(
-            int color,
-            boolean border
-    ) {
-        GradientDrawable drawable =
-                new GradientDrawable();
-
-        drawable.setColor(color);
-        drawable.setCornerRadius(dp(18));
-
-        if (border) {
-            drawable.setStroke(dp(1), GOLD);
-        }
-
-        return drawable;
+    private Button button(String title, Runnable action) {
+        Button result = new Button(this);
+        result.setText(title);
+        result.setAllCaps(false);
+        result.setTextSize(14);
+        result.setTextColor(BLACK);
+        result.setMinHeight(dp(48));
+        result.setMinimumHeight(dp(48));
+        result.setBackgroundTintList(ColorStateList.valueOf(GOLD));
+        result.setOnClickListener(v -> action.run());
+        return result;
     }
 
-    private TextView text(
-            String value,
-            int size,
-            int color
-    ) {
-        TextView view = new TextView(this);
-        view.setText(value);
-        view.setTextSize(size);
-        view.setTextColor(color);
-        view.setPadding(0, dp(4), 0, dp(4));
-        view.setLineSpacing(dp(2), 1);
-        return view;
-    }
-
-    private TextView bold(
-            String value,
-            int size,
-            int color
-    ) {
-        TextView view = text(value, size, color);
-        view.setTypeface(null, Typeface.BOLD);
-        return view;
-    }
-
-    private Button button(
-            String title,
-            Runnable action
-    ) {
-        Button view = new Button(this);
-        view.setText(title);
-        view.setAllCaps(false);
-        view.setTextSize(14);
-        view.setTextColor(BLACK);
-        view.setMinHeight(dp(48));
-        view.setMinimumHeight(dp(48));
-        view.setBackgroundTintList(
-                ColorStateList.valueOf(GOLD)
-        );
-        view.setOnClickListener(v -> action.run());
-        return view;
-    }
-
-    private Button secondary(
-            String title,
-            Runnable action
-    ) {
-        Button view = button(title, action);
-        view.setTextColor(GOLD);
-        view.setBackgroundTintList(
-                ColorStateList.valueOf(LINE)
-        );
-        return view;
+    private Button secondary(String title, Runnable action) {
+        Button result = button(title, action);
+        result.setTextColor(GOLD);
+        result.setBackgroundTintList(ColorStateList.valueOf(LINE));
+        return result;
     }
 
     private LinearLayout box(boolean border) {
-        LinearLayout view = new LinearLayout(this);
-        view.setOrientation(LinearLayout.VERTICAL);
-        view.setPadding(dp(14), dp(14), dp(14), dp(14));
-        view.setBackground(background(CARD, border));
-        return view;
+        LinearLayout result = new LinearLayout(this);
+        result.setOrientation(LinearLayout.VERTICAL);
+        result.setPadding(dp(14), dp(14), dp(14), dp(14));
+        result.setBackground(background(CARD, border));
+        return result;
     }
 
     private LinearLayout panel() {
-        LinearLayout view = box(false);
-
+        LinearLayout result = box(false);
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(-1, -2);
-
         params.setMargins(0, dp(8), 0, dp(8));
-        content.addView(view, params);
-
-        return view;
+        content.addView(result, params);
+        return result;
     }
 
-    private void section(String value) {
-        TextView title = bold(value, 22, WHITE);
-        title.setPadding(0, dp(18), 0, dp(8));
-        content.addView(title);
+    private void section(String title) {
+        TextView result = bold(title, 22, WHITE);
+        result.setPadding(0, dp(18), 0, dp(8));
+        content.addView(result);
     }
 
     private EditText input(
-            LinearLayout parent,
-            String hint,
-            String value,
-            int type,
-            int maxLength
+            LinearLayout parent, String hint,
+            String value, int type, int max
     ) {
-        EditText field = new EditText(this);
-        field.setText(value);
-        field.setHint(hint);
-        field.setInputType(type);
-        field.setTextColor(WHITE);
-        field.setHintTextColor(MUTED);
-        field.setTextSize(16);
-
-        field.setFilters(new InputFilter[]{
-                new InputFilter.LengthFilter(maxLength)
+        EditText result = new EditText(this);
+        result.setText(value);
+        result.setHint(hint);
+        result.setInputType(type);
+        result.setTextColor(WHITE);
+        result.setHintTextColor(MUTED);
+        result.setTextSize(16);
+        result.setFilters(new InputFilter[]{
+                new InputFilter.LengthFilter(max)
         });
-
-        field.setBackgroundTintList(
-                ColorStateList.valueOf(GOLD)
-        );
-
-        field.setPadding(dp(4), dp(12), dp(4), dp(12));
-
+        result.setBackgroundTintList(ColorStateList.valueOf(GOLD));
+        result.setPadding(dp(4), dp(12), dp(4), dp(12));
         parent.addView(
-                field,
+                result,
                 new LinearLayout.LayoutParams(-1, -2)
         );
-
-        return field;
+        return result;
     }
 
     private AlertDialog.Builder dialogBuilder() {
         return new AlertDialog.Builder(
-                this,
-                android.R.style.Theme_Material_Dialog_Alert
+                this, android.R.style.Theme_Material_Dialog_Alert
         );
     }
 
-    private void decorateDialog(AlertDialog dialog) {
+    private void decorate(AlertDialog dialog) {
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(
                     background(CARD, true)
             );
         }
 
-        TextView body = dialog.findViewById(
-                android.R.id.message
-        );
+        TextView body = dialog.findViewById(android.R.id.message);
+        if (body != null) body.setTextColor(WHITE);
 
-        if (body != null) {
-            body.setTextColor(WHITE);
-        }
-
-        int[] buttons = {
+        for (int which : new int[]{
                 AlertDialog.BUTTON_POSITIVE,
                 AlertDialog.BUTTON_NEGATIVE,
                 AlertDialog.BUTTON_NEUTRAL
-        };
-
-        for (int which : buttons) {
-            Button view = dialog.getButton(which);
-            if (view != null) {
-                view.setTextColor(GOLD);
-            }
+        }) {
+            Button b = dialog.getButton(which);
+            if (b != null) b.setTextColor(GOLD);
         }
     }
 
-    private void message(
-            String title,
-            String value
-    ) {
+    private void message(String title, String body) {
         if (destroyed || isFinishing()) return;
 
         AlertDialog dialog = dialogBuilder()
                 .setTitle(title)
-                .setMessage(value)
+                .setMessage(body)
                 .setPositiveButton("Понятно", null)
                 .create();
-
         dialog.show();
-        decorateDialog(dialog);
-    }
-
-    // -------------------- АКЦИИ --------------------
-
-    private void addPromotionBadge(
-            LinearLayout parent,
-            Product product
-    ) {
-        if (!product.hasPromotion()) return;
-
-        int percent = product.discountPercent();
-
-        TextView badge = bold(
-                percent >= 1
-                        ? "АКЦИЯ  −" + percent + "%"
-                        : "АКЦИОННАЯ ЦЕНА",
-                11,
-                BLACK
-        );
-
-        badge.setBackground(background(GOLD, false));
-        badge.setPadding(dp(9), dp(5), dp(9), dp(5));
-
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(-2, -2);
-
-        params.setMargins(0, dp(7), 0, dp(4));
-        parent.addView(badge, params);
-    }
-
-    private void addPriceBlock(
-            LinearLayout parent,
-            Product product,
-            int size
-    ) {
-        if (product.hasPromotion()) {
-            TextView old = text(
-                    money((long) product.oldPrice * 100) +
-                    " / " + product.unit,
-                    Math.max(12, size - 4),
-                    MUTED
-            );
-
-            old.setPaintFlags(
-                    old.getPaintFlags() |
-                    Paint.STRIKE_THRU_TEXT_FLAG
-            );
-
-            old.setContentDescription(
-                    "Старая цена: " +
-                    money((long) product.oldPrice * 100) +
-                    " за " + product.unit
-            );
-
-            parent.addView(old);
-        }
-
-        parent.addView(bold(
-                money((long) product.price * 100) +
-                " / " + product.unit,
-                size,
-                GOLD
-        ));
-    }
-
-    private List<Product> promotionProducts() {
-        List<Product> result = new ArrayList<>();
-
-        for (Product product : products) {
-            if (product.hasPromotion()) {
-                result.add(product);
-            }
-        }
-
-        return result;
-    }
-
-    private void openPromotions() {
-        saveProfile();
-        promotionsOnly = true;
-        category = "";
-        search = "";
-        currentTab = 1;
-        showingHistory = false;
-        render(false);
-    }
-
-    private void openFullCatalog() {
-        saveProfile();
-        promotionsOnly = false;
-        category = "";
-        search = "";
-        currentTab = 1;
-        showingHistory = false;
-        render(false);
+        decorate(dialog);
     }
 
     // -------------------- СОХРАНЕНИЕ --------------------
@@ -823,79 +569,48 @@ public class StoreActivity extends Activity {
         if (prefs == null) return;
 
         if (nameInput != null) {
-            customerName =
-                    nameInput.getText().toString().trim();
+            customerName = nameInput.getText().toString().trim();
         }
-
         if (phoneInput != null) {
-            customerPhone =
-                    phoneInput.getText().toString().trim();
+            customerPhone = phoneInput.getText().toString().trim();
         }
-
         if (addressInput != null) {
-            customerAddress =
-                    addressInput.getText().toString().trim();
+            customerAddress = addressInput.getText().toString().trim();
         }
-
         if (commentInput != null) {
-            customerComment =
-                    commentInput.getText().toString().trim();
+            customerComment = commentInput.getText().toString().trim();
+        }
+        if (otherCityInput != null) {
+            otherCity = otherCityInput.getText().toString().trim();
         }
 
         prefs.edit()
                 .putString("customer_name", customerName)
                 .putString("customer_phone", customerPhone)
                 .putString("customer_address", customerAddress)
-                .putString(CITY_PREF, deliveryCity)
+                .putString(CITY_PREF, city)
+                .putString(OTHER_CITY_PREF, otherCity)
                 .putBoolean("delivery", delivery)
                 .apply();
     }
 
-    private JSONObject cartJson(
-            Map<String, Integer> quantities
-    ) throws Exception {
+    private JSONObject cartJson(Map<String, Integer> values)
+            throws Exception {
         JSONObject result = new JSONObject();
-
-        for (Map.Entry<String, Integer> entry :
-                quantities.entrySet()) {
-            result.put(
-                    entry.getKey(),
-                    entry.getValue() / 2.0
-            );
+        for (Map.Entry<String, Integer> entry : values.entrySet()) {
+            result.put(entry.getKey(), entry.getValue() / 2.0);
         }
-
         return result;
     }
 
     private void saveCart() {
         try {
-            prefs.edit()
-                    .putString(
-                            "cart_v2",
-                            cartJson(cartHalves).toString()
-                    )
-                    .apply();
-
+            prefs.edit().putString(
+                    "cart_v2", cartJson(cart).toString()
+            ).apply();
         } catch (Exception error) {
-            message(
-                    "Корзина",
-                    "Не удалось сохранить корзину."
-            );
+            message("Корзина", "Не удалось сохранить корзину.");
         }
-    }
-
-    private void openTab(int tab) {
-        saveProfile();
-        currentTab = tab;
-        showingHistory = false;
-        render(false);
-    }
-
-    private void openHistory() {
-        saveProfile();
-        currentTab = 4;
-        showingHistory = true;
-        render(false);
     }
 
     private void redraw() {
@@ -903,390 +618,280 @@ public class StoreActivity extends Activity {
         render(true);
     }
 
+    private void openTab(int value) {
+        saveProfile();
+        tab = value;
+        showingHistory = false;
+        render(false);
+    }
+
+    private void openHistory() {
+        saveProfile();
+        tab = 4;
+        showingHistory = true;
+        render(false);
+    }
+
+    private void openCatalog(boolean sales) {
+        saveProfile();
+        category = "";
+        search = "";
+        promotionsOnly = sales;
+        tab = 1;
+        showingHistory = false;
+        render(false);
+    }
+
     // -------------------- ОСНОВНОЙ ЭКРАН --------------------
 
     private void render(boolean keepPosition) {
         if (destroyed) return;
 
-        final int oldY =
-                keepPosition ? scroll.getScrollY() : 0;
+        final int y = keepPosition ? scroll.getScrollY() : 0;
 
         nameInput = null;
         phoneInput = null;
         addressInput = null;
         commentInput = null;
+        otherCityInput = null;
 
         content.removeAllViews();
         navigation.removeAllViews();
 
-        drawHeader();
-        drawNavigation();
-
-        if (repeating()) {
-            content.addView(text(
-                    "Подготавливаем повтор заказа. Корзина " +
-                    "изменится только после вашего подтверждения.",
-                    13,
-                    GOLD
-            ));
-        }
-
-        if (loading) {
-            content.addView(text(
-                    "Обновляем каталог… Первый запуск после " +
-                    "простоя сервера может занять около минуты.",
-                    13,
-                    MUTED
-            ));
-
-        } else if (!freshCatalog) {
-            LinearLayout notice = panel();
-
-            notice.addView(text(
-                    "Каталог не обновлён. Для нового заказа " +
-                    "нужны интернет и актуальные цены.",
-                    14,
-                    MUTED
-            ));
-
-            notice.addView(button(
-                    "Загрузить каталог",
-                    this::loadCatalog
-            ));
-        }
-
-        switch (currentTab) {
-            case 0:
-                showHome();
-                break;
-
-            case 1:
-                showCatalog(false);
-                break;
-
-            case 2:
-                showCatalog(true);
-                break;
-
-            case 3:
-                showCart();
-                break;
-
-            default:
-                if (showingHistory) {
-                    showHistory();
-                } else {
-                    showProfile();
-                }
-                break;
-        }
-
-        scroll.post(() -> {
-            if (!destroyed) {
-                scroll.scrollTo(0, oldY);
-            }
-        });
-    }
-
-    private void drawHeader() {
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView logo = bold("ЛВ", 24, GOLD);
         logo.setGravity(Gravity.CENTER);
         logo.setBackground(background(CARD, true));
-        logo.setContentDescription("Логотип Лавка Вкуса");
-
         header.addView(
-                logo,
-                new LinearLayout.LayoutParams(dp(58), dp(58))
+                logo, new LinearLayout.LayoutParams(dp(58), dp(58))
         );
 
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         titles.setPadding(dp(12), 0, 0, 0);
-
-        titles.addView(bold(
-                "Лавка Вкуса",
-                25,
-                WHITE
-        ));
-
-        titles.addView(text(
-                "Рыба · Морепродукты · Раки",
-                12,
-                MUTED
-        ));
+        titles.addView(bold("Лавка Вкуса", 25, WHITE));
+        titles.addView(text("Рыба · Морепродукты · Раки", 12, MUTED));
 
         header.addView(
-                titles,
-                new LinearLayout.LayoutParams(0, -2, 1)
+                titles, new LinearLayout.LayoutParams(0, -2, 1)
         );
-
         content.addView(header);
-
         content.addView(text(
-                "Макеевка  •  Доставка и самовывоз",
-                13,
-                GOLD
+                "Макеевка • Доставка и самовывоз", 13, GOLD
         ));
-    }
 
-    private void drawNavigation() {
-        for (int i = 0; i < tabs.length; i++) {
-            final int tab = i;
-            String label = tabs[i];
+        for (int i = 0; i < TABS.length; i++) {
+            final int destination = i;
+            String label = TABS[i];
 
-            if (i == 3 && !cartHalves.isEmpty()) {
-                label += " (" + cartHalves.size() + ")";
+            if (i == 3 && !cart.isEmpty()) {
+                label += " (" + cart.size() + ")";
             }
 
             TextView item = text(
-                    tabIcons[i] + "\n" + label,
-                    10,
-                    i == currentTab ? BLACK : MUTED
+                    ICONS[i] + "\n" + label,
+                    10, i == tab ? BLACK : MUTED
             );
-
             item.setGravity(Gravity.CENTER);
             item.setPadding(dp(1), dp(5), dp(1), dp(5));
 
-            if (i == currentTab) {
+            if (i == tab) {
                 item.setBackground(background(GOLD, false));
                 item.setTypeface(null, Typeface.BOLD);
             }
 
             item.setContentDescription(label);
-            item.setOnClickListener(v -> openTab(tab));
+            item.setOnClickListener(v -> openTab(destination));
 
             LinearLayout.LayoutParams params =
                     new LinearLayout.LayoutParams(0, dp(58), 1);
-
             params.setMargins(dp(2), 0, dp(2), 0);
             navigation.addView(item, params);
         }
+
+        if (loadingCatalog) {
+            content.addView(text(
+                    "Обновляем каталог… После простоя сервера " +
+                    "это может занять около минуты.",
+                    13, MUTED
+            ));
+        } else if (!freshCatalog) {
+            LinearLayout notice = panel();
+            notice.addView(text(
+                    "Для нового заказа нужны интернет " +
+                    "и актуальные цены.", 14, MUTED
+            ));
+            notice.addView(button(
+                    "Загрузить каталог", this::loadCatalog
+            ));
+        }
+
+        if (preparing) {
+            content.addView(text(
+                    "Проверяем выбранное время…", 14, GOLD
+            ));
+        }
+        if (repeatingId != null) {
+            content.addView(text(
+                    "Подготавливаем повтор. Корзина изменится " +
+                    "только после подтверждения.", 13, GOLD
+            ));
+        }
+
+        switch (tab) {
+            case 0: showHome(); break;
+            case 1: showCatalog(false); break;
+            case 2: showCatalog(true); break;
+            case 3: showCart(); break;
+            default:
+                if (showingHistory) showHistory();
+                else showProfile();
+                break;
+        }
+
+        scroll.post(() -> {
+            if (!destroyed) scroll.scrollTo(0, y);
+        });
     }
 
     private void showHome() {
         LinearLayout banner = panel();
-
         GradientDrawable gradient = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                new int[]{
-                        Color.rgb(68, 54, 23),
-                        Color.rgb(30, 29, 25),
-                        CARD
-                }
+                new int[]{Color.rgb(68, 54, 23), BLACK, CARD}
         );
-
         gradient.setCornerRadius(dp(18));
-        gradient.setStroke(dp(1), LINE);
         banner.setBackground(gradient);
 
-        banner.addView(text(
-                "ВКУС, КОТОРЫЙ ОБЪЕДИНЯЕТ",
-                11,
-                GOLD
-        ));
-
+        banner.addView(text("ВКУС, КОТОРЫЙ ОБЪЕДИНЯЕТ", 11, GOLD));
         banner.addView(bold(
-                "К вашему столу —\nс заботой и вкусом",
-                28,
-                WHITE
+                "К вашему столу —\nс заботой и вкусом", 28, WHITE
         ));
-
         banner.addView(text(
                 "Рыба, морепродукты и живые раки.\n" +
-                "Выбирайте в приложении — " +
-                "оплачивайте при получении.",
-                15,
-                WHITE
+                "Выбирайте в приложении — оплачивайте при получении.",
+                15, WHITE
         ));
-
         banner.addView(button(
-                "Выбрать товары",
-                this::openFullCatalog
+                "Выбрать товары", () -> openCatalog(false)
         ));
 
-        List<Product> promotions = promotionProducts();
+        List<Product> sales = new ArrayList<>();
+        for (Product p : products) {
+            if (p.promotion()) sales.add(p);
+        }
 
-        LinearLayout promoBanner = panel();
-        promoBanner.addView(bold("Акции", 24, GOLD));
-
-        promoBanner.addView(text(
-                promotions.isEmpty()
-                        ? "Здесь появятся товары " +
-                          "со специальной ценой."
-                        : "Выгодные предложения: " +
-                          promotions.size() +
-                          ". Скидка уже учтена в текущей цене.",
-                14,
-                WHITE
+        LinearLayout promo = panel();
+        promo.addView(bold("Акции", 24, GOLD));
+        promo.addView(text(
+                sales.isEmpty()
+                        ? "Здесь появятся специальные предложения."
+                        : "Выгодных предложений: " + sales.size() +
+                          ". Скидка уже учтена в цене.",
+                14, WHITE
+        ));
+        promo.addView(button(
+                "Смотреть акции", () -> openCatalog(true)
         ));
 
-        promoBanner.addView(button(
-                "Смотреть акции",
-                this::openPromotions
-        ));
-
-        if (!promotions.isEmpty()) {
-            section("Специальные предложения");
-
-            productGrid(new ArrayList<>(
-                    promotions.subList(
-                            0,
-                            Math.min(4, promotions.size())
-                    )
+        if (!sales.isEmpty()) {
+            grid(new ArrayList<>(
+                    sales.subList(0, Math.min(4, sales.size()))
             ));
         }
 
         LinearLayout shipping = panel();
-
-        shipping.addView(bold(
-                "Доставка от 2 000 ₽ — бесплатно",
-                18,
-                GOLD
-        ));
-
-        shipping.addView(text(DELIVERY, 14, MUTED));
-
+        shipping.addView(bold("Доставка и самовывоз", 21, GOLD));
+        shipping.addView(text(DELIVERY, 14, WHITE));
         shipping.addView(text(
-                "Выберите город в корзине — приложение " +
-                "покажет условия для вашего заказа.",
-                14,
-                WHITE
+                "В корзине можно выбрать доступную дату и время. " +
+                "Интервал необходимо подтвердить с магазином.",
+                14, MUTED
         ));
 
-        if (orderHistory.length() > 0) {
+        if (history.length() > 0 || pending != null) {
             LinearLayout orders = panel();
-
-            orders.addView(bold(
-                    "Ваши заказы",
-                    20,
-                    GOLD
-            ));
-
-            orders.addView(text(
-                    "Проверьте статус или повторите покупку " +
-                    "по актуальным ценам.",
-                    14,
-                    MUTED
-            ));
-
-            orders.addView(button(
-                    "Мои заказы",
-                    this::openHistory
-            ));
+            orders.addView(bold("Ваши заказы", 20, GOLD));
+            orders.addView(button("Мои заказы", this::openHistory));
         }
 
         section("Категории");
         categoryChips();
-
         section("Наш ассортимент");
 
-        List<Product> preview = new ArrayList<>();
-
-        for (int i = 0;
-             i < Math.min(6, products.size());
-             i++) {
-            preview.add(products.get(i));
-        }
-
-        productGrid(preview);
+        grid(new ArrayList<>(
+                products.subList(0, Math.min(6, products.size()))
+        ));
 
         if (products.isEmpty() && freshCatalog) {
             content.addView(text(
-                    "Скоро здесь появятся товары.",
-                    16,
-                    MUTED
+                    "Скоро здесь появятся товары.", 16, MUTED
             ));
         }
 
         content.addView(secondary(
-                "Весь каталог",
-                this::openFullCatalog
+                "Весь каталог", () -> openCatalog(false)
         ));
 
         LinearLayout pickup = panel();
-
-        pickup.addView(bold(
-                "Ждём вас в магазине",
-                20,
-                GOLD
-        ));
-
+        pickup.addView(bold("Ждём вас в магазине", 20, GOLD));
         pickup.addView(text(PICKUP, 15, WHITE));
 
         content.addView(secondary(
-                "Обновить ассортимент",
-                this::loadCatalog
+                "Обновить ассортимент", this::loadCatalog
         ));
     }
 
     private void categoryChips() {
         HorizontalScrollView horizontal =
                 new HorizontalScrollView(this);
-
         horizontal.setHorizontalScrollBarEnabled(false);
 
         LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
+        addCategory(row, "Все товары", "");
 
-        addCategoryChip(row, "Все товары", "");
-
-        Set<String> categories = new LinkedHashSet<>();
-
-        for (Product product : products) {
-            categories.add(product.category);
-        }
-
-        for (String value : categories) {
-            addCategoryChip(row, value, value);
-        }
+        Set<String> values = new LinkedHashSet<>();
+        for (Product p : products) values.add(p.category);
+        for (String value : values) addCategory(row, value, value);
 
         horizontal.addView(row);
         content.addView(horizontal);
     }
 
-    private void addCategoryChip(
-            LinearLayout row,
-            String title,
-            String value
+    private void addCategory(
+            LinearLayout row, String title, String value
     ) {
         Button chip = secondary(title, () -> {
+            saveProfile();
             category = value;
             search = "";
             promotionsOnly = false;
-            openTab(1);
+            tab = 1;
+            showingHistory = false;
+            render(false);
         });
 
         if (category.equals(value) && !promotionsOnly) {
             chip.setTextColor(BLACK);
-            chip.setBackgroundTintList(
-                    ColorStateList.valueOf(GOLD)
-            );
+            chip.setBackgroundTintList(ColorStateList.valueOf(GOLD));
         }
 
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(-2, dp(50));
-
         params.setMargins(0, 0, dp(8), 0);
         row.addView(chip, params);
     }
 
     private void showCatalog(boolean onlyFavorites) {
-        section(
-                onlyFavorites
-                        ? "Избранное"
-                        : promotionsOnly ? "Акции" : "Каталог"
-        );
+        section(onlyFavorites
+                ? "Избранное" : promotionsOnly ? "Акции" : "Каталог");
 
         if (!onlyFavorites) {
             EditText query = input(
-                    content,
-                    "Поиск товара",
-                    search,
-                    InputType.TYPE_CLASS_TEXT,
-                    100
+                    content, "Поиск товара", search,
+                    InputType.TYPE_CLASS_TEXT, 100
             );
 
             content.addView(button("Найти", () -> {
@@ -1294,784 +899,358 @@ public class StoreActivity extends Activity {
                 redraw();
             }));
 
-            LinearLayout filters = new LinearLayout(this);
-            filters.setOrientation(LinearLayout.HORIZONTAL);
+            content.addView(secondary(
+                    promotionsOnly ? "Показать все товары" : "Только акции",
+                    () -> {
+                        search = query.getText().toString().trim();
+                        promotionsOnly = !promotionsOnly;
+                        redraw();
+                    }
+            ));
 
-            Button all = secondary("Все товары", () -> {
-                search = query.getText().toString().trim();
-                promotionsOnly = false;
-                redraw();
-            });
-
-            Button sales = secondary("Акции", () -> {
-                search = query.getText().toString().trim();
-                promotionsOnly = true;
-                redraw();
-            });
-
-            Button selected = promotionsOnly ? sales : all;
-
-            selected.setTextColor(BLACK);
-            selected.setBackgroundTintList(
-                    ColorStateList.valueOf(GOLD)
-            );
-
-            LinearLayout.LayoutParams left =
-                    new LinearLayout.LayoutParams(0, -2, 1);
-
-            left.setMargins(0, dp(5), dp(5), dp(5));
-
-            LinearLayout.LayoutParams right =
-                    new LinearLayout.LayoutParams(0, -2, 1);
-
-            right.setMargins(dp(5), dp(5), 0, dp(5));
-
-            filters.addView(all, left);
-            filters.addView(sales, right);
-
-            content.addView(filters);
             categoryChips();
 
-            if (
-                    !search.isEmpty() ||
-                    !category.isEmpty() ||
-                    promotionsOnly
-            ) {
-                content.addView(secondary(
-                        "Сбросить фильтры",
-                        () -> {
-                            search = "";
-                            category = "";
-                            promotionsOnly = false;
-                            redraw();
-                        }
-                ));
+            if (!search.isEmpty() || !category.isEmpty() || promotionsOnly) {
+                content.addView(secondary("Сбросить фильтры", () -> {
+                    search = "";
+                    category = "";
+                    promotionsOnly = false;
+                    redraw();
+                }));
             }
         }
 
         List<Product> found = new ArrayList<>();
         String query = search.toLowerCase(Locale.ROOT);
 
-        for (Product product : products) {
+        for (Product p : products) {
             if (onlyFavorites) {
-                if (!favorites.contains(product.id)) {
-                    continue;
-                }
-
+                if (!favorites.contains(p.id)) continue;
             } else {
-                if (
-                        promotionsOnly &&
-                        !product.hasPromotion()
-                ) {
-                    continue;
-                }
-
-                if (
-                        !category.isEmpty() &&
-                        !category.equals(product.category)
-                ) {
+                if (promotionsOnly && !p.promotion()) continue;
+                if (!category.isEmpty() && !category.equals(p.category)) {
                     continue;
                 }
 
                 String searchable =
-                        product.name + " " +
-                        product.category + " " +
-                        product.description;
-
-                if (
-                        !searchable.toLowerCase(Locale.ROOT)
-                                .contains(query)
-                ) {
+                        p.name + " " + p.category + " " + p.description;
+                if (!searchable.toLowerCase(Locale.ROOT).contains(query)) {
                     continue;
                 }
             }
-
-            found.add(product);
+            found.add(p);
         }
 
-        content.addView(text(
-                "Товаров: " + found.size(),
-                13,
-                MUTED
-        ));
-
-        if (!onlyFavorites && promotionsOnly) {
-            content.addView(text(
-                    "Акционная цена уже используется " +
-                    "при расчёте корзины и заказа.",
-                    13,
-                    GOLD
-            ));
-        }
-
-        productGrid(found);
+        content.addView(text("Товаров: " + found.size(), 13, MUTED));
+        grid(found);
 
         if (found.isEmpty()) {
-            LinearLayout empty = panel();
-
-            empty.addView(text(
+            panel().addView(text(
                     onlyFavorites
-                            ? "Здесь будут любимые товары. " +
-                              "Нажимайте ♡ на карточках."
-                            : promotionsOnly
-                            ? "По выбранным условиям акций пока нет. " +
-                              "Сбросьте поиск или откройте весь каталог."
-                            : "Ничего не найдено. Попробуйте " +
-                              "другой запрос или категорию.",
-                    16,
-                    MUTED
+                            ? "Нажимайте ♡ на карточках любимых товаров."
+                            : "Ничего не найдено. Измените фильтры.",
+                    16, MUTED
             ));
         }
 
         if (!onlyFavorites) {
             content.addView(secondary(
-                    "Обновить каталог",
-                    this::loadCatalog
+                    "Обновить каталог", this::loadCatalog
             ));
         }
     }
 
-    private void productGrid(List<Product> list) {
-        int columns =
-                getResources()
-                        .getConfiguration()
-                        .screenWidthDp < 340
-                        ? 1 : 2;
+    // -------------------- КАРТОЧКИ ТОВАРОВ --------------------
 
-        for (int start = 0;
-             start < list.size();
-             start += columns) {
+    private void badge(LinearLayout parent, Product p) {
+        if (!p.promotion()) return;
 
+        TextView value = bold(
+                p.discount() > 0
+                        ? "АКЦИЯ −" + p.discount() + "%"
+                        : "АКЦИОННАЯ ЦЕНА",
+                11, BLACK
+        );
+        value.setBackground(background(GOLD, false));
+        value.setPadding(dp(8), dp(5), dp(8), dp(5));
+        parent.addView(value);
+    }
+
+    private void prices(LinearLayout parent, Product p, int size) {
+        if (p.promotion()) {
+            TextView old = text(
+                    money((long) p.oldPrice * 100) + " / " + p.unit,
+                    Math.max(12, size - 4), MUTED
+            );
+            old.setPaintFlags(
+                    old.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG
+            );
+            parent.addView(old);
+        }
+
+        parent.addView(bold(
+                money((long) p.price * 100) + " / " + p.unit,
+                size, GOLD
+        ));
+    }
+
+    private void grid(List<Product> values) {
+        int columns = getResources().getConfiguration().screenWidthDp
+                < 340 ? 1 : 2;
+
+        for (int start = 0; start < values.size(); start += columns) {
             LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
             row.setBaselineAligned(false);
 
-            for (int column = 0;
-                 column < columns;
-                 column++) {
-
+            for (int column = 0; column < columns; column++) {
                 int index = start + column;
-
                 LinearLayout.LayoutParams params =
                         new LinearLayout.LayoutParams(0, -1, 1);
-
                 params.setMargins(
-                        column == 0 ? 0 : dp(5),
-                        dp(6),
-                        column == columns - 1 ? 0 : dp(5),
-                        dp(6)
+                        column == 0 ? 0 : dp(5), dp(6),
+                        column == columns - 1 ? 0 : dp(5), dp(6)
                 );
 
                 row.addView(
-                        index < list.size()
-                                ? compactCard(list.get(index))
+                        index < values.size()
+                                ? productCard(values.get(index))
                                 : new View(this),
                         params
                 );
             }
 
-            content.addView(
-                    row,
-                    new LinearLayout.LayoutParams(-1, -2)
-            );
+            content.addView(row, new LinearLayout.LayoutParams(-1, -2));
         }
     }
 
-    private LinearLayout compactCard(Product product) {
-        LinearLayout card = box(product.hasPromotion());
+    private LinearLayout productCard(Product p) {
+        LinearLayout card = box(p.promotion());
         card.setPadding(dp(9), dp(9), dp(9), dp(9));
 
-        ProductPhoto picture = new ProductPhoto(
-                this,
-                product.name,
-                product.category,
-                product.imageUrl
-        );
-
-        picture.setOnClickListener(
-                v -> showProduct(product)
-        );
-
-        picture.setContentDescription(
-                "Открыть товар: " + product.name
-        );
-
+        ProductPhoto photo =
+                new ProductPhoto(this, p.name, p.category, p.imageUrl);
+        photo.setOnClickListener(v -> showProduct(p));
+        photo.setContentDescription("Открыть товар: " + p.name);
         card.addView(
-                picture,
-                new LinearLayout.LayoutParams(-1, dp(132))
+                photo, new LinearLayout.LayoutParams(-1, dp(132))
         );
 
-        addPromotionBadge(card, product);
+        badge(card, p);
+        card.addView(text(p.category, 11, MUTED));
 
-        card.addView(text(
-                product.category,
-                11,
-                MUTED
-        ));
-
-        TextView name = bold(product.name, 15, WHITE);
+        TextView name = bold(p.name, 15, WHITE);
         name.setMinLines(2);
-        name.setOnClickListener(v -> showProduct(product));
-
+        name.setOnClickListener(v -> showProduct(p));
         card.addView(name);
-        addPriceBlock(card, product, 17);
 
+        prices(card, p, 17);
         card.addView(text(
-                isKilogram(product)
-                        ? "500 г — " +
-                          money((long) product.price * 50)
-                        : stepText(product),
-                12,
-                MUTED
+                kg(p)
+                        ? "500 г — " + money((long) p.price * 50)
+                        : "Шаг выбора — 1 " + p.unit,
+                12, MUTED
         ));
 
         Button favorite = secondary(
-                favorites.contains(product.id)
-                        ? "♥ Сохранено"
-                        : "♡ Сохранить",
-                () -> toggleFavorite(product)
+                favorites.contains(p.id) ? "♥ Сохранено" : "♡ Сохранить",
+                () -> {
+                    if (!favorites.add(p.id)) favorites.remove(p.id);
+                    prefs.edit().putStringSet(
+                            "favorites_v2", new HashSet<>(favorites)
+                    ).apply();
+                    redraw();
+                }
         );
-
         favorite.setTextSize(12);
         card.addView(favorite);
-
-        addQuantityControls(card, product);
+        quantityControls(card, p);
 
         return card;
     }
 
-    private void showProduct(Product product) {
+    private void showProduct(Product p) {
         if (destroyed || isFinishing()) return;
 
         ScrollView body = new ScrollView(this);
         LinearLayout detail = box(false);
 
         detail.addView(
-                new ProductPhoto(
-                        this,
-                        product.name,
-                        product.category,
-                        product.imageUrl
-                ),
+                new ProductPhoto(this, p.name, p.category, p.imageUrl),
                 new LinearLayout.LayoutParams(-1, dp(230))
         );
+        badge(detail, p);
+        detail.addView(text(p.category, 13, MUTED));
+        detail.addView(bold(p.name, 23, WHITE));
+        prices(detail, p, 24);
 
-        addPromotionBadge(detail, product);
-
-        detail.addView(text(
-                product.category,
-                13,
-                MUTED
-        ));
-
-        detail.addView(bold(
-                product.name,
-                23,
-                WHITE
-        ));
-
-        addPriceBlock(detail, product, 24);
-
-        if (product.hasPromotion()) {
+        if (kg(p)) {
             detail.addView(text(
-                    "Разница с прежней ценой: " +
-                    money(
-                            ((long) product.oldPrice -
-                             product.price) * 100L
-                    ) +
-                    " за " + product.unit + ".",
-                    14,
-                    GOLD
-            ));
-        }
-
-        if (isKilogram(product)) {
-            detail.addView(text(
-                    "500 г — " +
-                    money((long) product.price * 50),
-                    17,
-                    GOLD
+                    "500 г — " + money((long) p.price * 50), 17, GOLD
             ));
         }
 
         detail.addView(text(
-                product.description.isEmpty()
-                        ? "Подробности о товаре можно уточнить " +
-                          "при подтверждении заказа."
-                        : product.description,
-                16,
-                WHITE
+                p.description.isEmpty()
+                        ? "Подробности уточняйте у магазина."
+                        : p.description,
+                16, WHITE
         ));
-
-        detail.addView(text(
-                stepText(product) +
-                ".\nОплата при получении.",
-                14,
-                MUTED
-        ));
-
+        detail.addView(text("Оплата при получении.", 14, MUTED));
         body.addView(detail);
 
         AlertDialog dialog = dialogBuilder()
                 .setView(body)
                 .setNegativeButton("Закрыть", null)
                 .setPositiveButton(
-                        isKilogram(product)
-                                ? "Добавить 500 г"
-                                : "Добавить 1 " + product.unit,
+                        kg(p) ? "Добавить 500 г" : "Добавить 1 " + p.unit,
                         null
                 )
                 .create();
 
         dialog.show();
-        decorateDialog(dialog);
+        decorate(dialog);
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> {
-                    if (changeQuantity(product, 1)) {
-                        dialog.dismiss();
-
-                        Toast.makeText(
-                                this,
-                                "Товар добавлен в корзину",
-                                Toast.LENGTH_SHORT
-                        ).show();
-                    }
+                    if (changeQuantity(p, 1)) dialog.dismiss();
                 });
     }
 
-    private void toggleFavorite(Product product) {
-        if (!favorites.add(product.id)) {
-            favorites.remove(product.id);
-        }
-
-        prefs.edit()
-                .putStringSet(
-                        "favorites_v2",
-                        new HashSet<>(favorites)
-                )
-                .apply();
-
-        redraw();
-    }
-
-    private void addQuantityControls(
-            LinearLayout parent,
-            Product product
-    ) {
-        int value = halves(product.id);
+    private void quantityControls(LinearLayout parent, Product p) {
+        int value = halves(p.id);
 
         if (value == 0) {
             parent.addView(button(
-                    isKilogram(product)
-                            ? "+ 500 г"
-                            : "В корзину",
-                    () -> changeQuantity(product, 1)
+                    kg(p) ? "+ 500 г" : "В корзину",
+                    () -> changeQuantity(p, 1)
             ));
             return;
         }
 
-        LinearLayout controls = new LinearLayout(this);
-        controls.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
 
-        Button minus = secondary(
-                "−",
-                () -> changeQuantity(product, -1)
-        );
+        Button minus = secondary("−", () -> changeQuantity(p, -1));
+        Button plus = button("+", () -> changeQuantity(p, 1));
 
-        Button plus = button(
-                "+",
-                () -> changeQuantity(product, 1)
-        );
+        minus.setContentDescription("Уменьшить: " + p.name);
+        plus.setContentDescription("Увеличить: " + p.name);
 
-        minus.setContentDescription(
-                "Уменьшить количество: " + product.name
-        );
-
-        plus.setContentDescription(
-                "Увеличить количество: " + product.name
-        );
-
-        for (Button view : new Button[]{minus, plus}) {
-            view.setMinWidth(0);
-            view.setMinimumWidth(0);
-            view.setPadding(0, 0, 0, 0);
+        for (Button b : new Button[]{minus, plus}) {
+            b.setMinWidth(0);
+            b.setMinimumWidth(0);
+            b.setPadding(0, 0, 0, 0);
         }
 
-        controls.addView(
-                minus,
-                new LinearLayout.LayoutParams(dp(44), dp(48))
+        row.addView(
+                minus, new LinearLayout.LayoutParams(dp(44), dp(48))
         );
 
-        TextView count = bold(
-                quantityText(product, value),
-                13,
-                WHITE
-        );
-
+        TextView count = bold(quantity(p, value), 13, WHITE);
         count.setGravity(Gravity.CENTER);
-
-        controls.addView(
-                count,
-                new LinearLayout.LayoutParams(0, -2, 1)
+        row.addView(count, new LinearLayout.LayoutParams(0, -2, 1));
+        row.addView(
+                plus, new LinearLayout.LayoutParams(dp(44), dp(48))
         );
-
-        controls.addView(
-                plus,
-                new LinearLayout.LayoutParams(dp(44), dp(48))
-        );
-
-        parent.addView(controls);
+        parent.addView(row);
     }
 
-    private Product findProduct(String id) {
-        for (Product product : products) {
-            if (product.id.equals(id)) {
-                return product;
-            }
-        }
-
-        return null;
-    }
-
-    private boolean changeQuantity(
-            Product product,
-            int direction
-    ) {
-        if (pendingOrder != null || sending) {
+    private boolean changeQuantity(Product p, int direction) {
+        if (busyCart()) {
             message(
-                    "Есть неподтверждённый заказ",
-                    "Сначала проверьте его отправку " +
-                    "в разделе «Корзина»."
+                    "Корзина",
+                    "Сначала завершите текущую проверку или " +
+                    "проверьте неподтверждённый заказ."
             );
             return false;
         }
 
-        if (repeating()) {
-            message(
-                    "Подготовка повтора",
-                    "Завершите или отмените повтор заказа " +
-                    "перед изменением корзины."
-            );
-            return false;
-        }
-
-        int current = halves(product.id);
-        int step = isKilogram(product) ? 1 : 2;
-
+        int current = halves(p.id);
+        int step = kg(p) ? 1 : 2;
         int next = step == 2 && current % 2 != 0
                 ? current + (direction > 0 ? 1 : -1)
                 : current + direction * step;
 
         if (next > 100) {
-            message(
-                    "Ограничение количества",
-                    "Можно выбрать не более 50 " +
-                    product.unit + " одного товара."
-            );
+            message("Количество", "Можно выбрать до 50 " + p.unit + ".");
             return false;
         }
 
-        next = Math.max(0, next);
-
-        if (next == 0) {
-            cartHalves.remove(product.id);
-        } else {
-            cartHalves.put(product.id, next);
-        }
+        if (next <= 0) cart.remove(p.id);
+        else cart.put(p.id, next);
 
         saveCart();
         redraw();
-
         return true;
     }
 
-    // -------------------- КОРЗИНА --------------------
+    // -------------------- ГОРОД И ДАННЫЕ ПОКУПАТЕЛЯ --------------------
 
-    private void showCart() {
-        section("Корзина");
+    private void cityFields(LinearLayout parent) {
+        parent.addView(bold("Город доставки", 16, WHITE));
+        Button selector = secondary(
+                city.isEmpty() ? "Выберите город" : "Город: " + city,
+                () -> {
+                    if (busyCart()) return;
+                    saveProfile();
 
-        if (pendingOrder != null) {
-            LinearLayout pending = panel();
-
-            pending.addView(bold(
-                    "Проверим прежний заказ",
-                    20,
-                    GOLD
-            ));
-
-            pending.addView(text(
-                    "Результат предыдущей отправки не подтверждён. " +
-                    "Проверка использует прежний идентификатор " +
-                    "и не создаёт второй заказ с ним. Содержимое " +
-                    "сохранённого запроса не изменяется.",
-                    14,
-                    WHITE
-            ));
-
-            Button retry = button(
-                    sending
-                            ? "Проверяем…"
-                            : "Проверить прежний заказ",
-                    this::confirmPending
-            );
-
-            retry.setEnabled(!sending && !repeating());
-            pending.addView(retry);
-        }
-
-        if (cartHalves.isEmpty()) {
-            LinearLayout empty = panel();
-
-            empty.addView(bold(
-                    "Пока здесь пусто",
-                    22,
-                    WHITE
-            ));
-
-            empty.addView(text(
-                    "Самое время выбрать что-нибудь вкусное.",
-                    15,
-                    MUTED
-            ));
-
-            empty.addView(button(
-                    "Открыть каталог",
-                    this::openFullCatalog
-            ));
-
-            return;
-        }
-
-        for (String id :
-                new ArrayList<>(cartHalves.keySet())) {
-
-            Product product = findProduct(id);
-
-            if (product == null) {
-                LinearLayout unavailable = panel();
-
-                unavailable.addView(text(
-                        "Товар временно недоступен в каталоге.",
-                        15,
-                        GOLD
-                ));
-
-                if (
-                        pendingOrder == null &&
-                        !sending &&
-                        !repeating()
-                ) {
-                    unavailable.addView(secondary(
-                            "Убрать недоступный товар",
-                            () -> {
-                                if (
-                                        pendingOrder != null ||
-                                        sending ||
-                                        repeating()
-                                ) {
-                                    return;
-                                }
-
-                                cartHalves.remove(id);
-                                saveCart();
-                                redraw();
-                            }
-                    ));
+                    AlertDialog dialog = dialogBuilder()
+                            .setTitle("Город доставки")
+                            .setSingleChoiceItems(
+                                    CITIES,
+                                    Arrays.asList(CITIES).indexOf(city),
+                                    (d, which) -> {
+                                        city = CITIES[which];
+                                        saveProfile();
+                                        d.dismiss();
+                                        render(true);
+                                    }
+                            )
+                            .setNegativeButton("Отмена", null)
+                            .create();
+                    dialog.show();
+                    decorate(dialog);
                 }
+        );
+        selector.setEnabled(!busyCart());
+        parent.addView(selector);
 
-                continue;
-            }
-
-            LinearLayout item = panel();
-
-            item.addView(
-                    new ProductPhoto(
-                            this,
-                            product.name,
-                            product.category,
-                            product.imageUrl
-                    ),
-                    new LinearLayout.LayoutParams(-1, dp(150))
+        if ("Другой город".equals(city)) {
+            otherCityInput = input(
+                    parent, "Название вашего города",
+                    otherCity,
+                    InputType.TYPE_CLASS_TEXT |
+                            InputType.TYPE_TEXT_FLAG_CAP_WORDS,
+                    80
             );
-
-            addPromotionBadge(item, product);
-
-            item.addView(bold(
-                    product.name,
-                    20,
-                    WHITE
-            ));
-
-            addPriceBlock(item, product, 18);
-
-            item.addView(text(
-                    stepText(product),
-                    13,
-                    MUTED
-            ));
-
-            if (
-                    !isKilogram(product) &&
-                    halves(product.id) % 2 != 0
-            ) {
-                item.addView(text(
-                        "Единица продажи изменилась. Исправьте " +
-                        "количество кнопкой «+» или «−».",
-                        14,
-                        GOLD
-                ));
-            }
-
-            addQuantityControls(item, product);
-
-            item.addView(bold(
-                    "Сумма: " + money(lineKopecks(product)),
-                    18,
-                    GOLD
-            ));
+            otherCityInput.setEnabled(!busyCart());
         }
 
-        LinearLayout summary = panel();
-
-        summary.addView(bold(
-                "Товары: " + money(totalKopecks()),
-                25,
-                GOLD
-        ));
-
-        summary.addView(text(
-                "Акционные цены уже учтены в сумме.",
-                13,
-                MUTED
-        ));
-
-        summary.addView(text(DELIVERY, 14, MUTED));
-
-        summary.addView(text(
-                "Самовывоз: " + PICKUP,
-                14,
-                MUTED
-        ));
-
-        summary.addView(bold(
-                "Оплата при получении",
-                17,
-                WHITE
-        ));
-
-        if (pendingOrder != null) {
-            return;
-        }
-
-        summary.addView(bold(
-                "Данные для заказа",
-                20,
-                WHITE
-        ));
-
-        customerFields(summary, true);
-
-        Button send = button(
-                sending
-                        ? "Отправляем…"
-                        : "Оформить заказ",
-                this::prepareOrder
-        );
-
-        send.setEnabled(
-                freshCatalog &&
-                !loading &&
-                !sending &&
-                !repeating()
-        );
-
-        summary.addView(send);
-
-        summary.addView(secondary(
-                "Очистить корзину",
-                this::confirmClearCart
+        parent.addView(text(
+                deliveryHint(city, total()), 14, MUTED
         ));
     }
 
-    private void confirmClearCart() {
-        if (
-                sending ||
-                pendingOrder != null ||
-                repeating()
-        ) {
-            return;
-        }
-
-        AlertDialog dialog = dialogBuilder()
-                .setTitle("Очистить корзину?")
-                .setMessage(
-                        "Все выбранные товары будут убраны."
-                )
-                .setNegativeButton("Оставить", null)
-                .setPositiveButton(
-                        "Очистить",
-                        (d, which) -> {
-                            if (
-                                    sending ||
-                                    pendingOrder != null ||
-                                    repeating()
-                            ) {
-                                return;
-                            }
-
-                            saveProfile();
-                            cartHalves.clear();
-                            saveCart();
-                            render(false);
-                        }
-                )
-                .create();
-
-        dialog.show();
-        decorateDialog(dialog);
-    }
-
-    private void customerFields(
-            LinearLayout parent,
-            boolean order
-    ) {
+    private void customerFields(LinearLayout parent, boolean order) {
         nameInput = input(
-                parent,
-                "Ваше имя",
-                customerName,
+                parent, "Ваше имя", customerName,
                 InputType.TYPE_CLASS_TEXT |
                         InputType.TYPE_TEXT_FLAG_CAP_WORDS,
                 80
         );
-
         phoneInput = input(
-                parent,
-                "Телефон: +7…",
-                customerPhone,
-                InputType.TYPE_CLASS_PHONE,
-                32
+                parent, "Телефон: +7…", customerPhone,
+                InputType.TYPE_CLASS_PHONE, 32
         );
 
         if (!order) {
-            addCitySelector(parent);
-
+            cityFields(parent);
             addressInput = input(
-                    parent,
-                    "Полный адрес доставки",
-                    customerAddress,
+                    parent, "Полный адрес доставки", customerAddress,
                     InputType.TYPE_CLASS_TEXT |
                             InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
                     250
             );
-
-            parent.addView(text(
-                    "Для варианта «Другой город» обязательно " +
-                    "укажите название города в адресе.",
-                    13,
-                    MUTED
-            ));
-
             return;
         }
 
@@ -2081,881 +1260,893 @@ public class StoreActivity extends Activity {
         mode.setTextSize(16);
         mode.setPadding(0, dp(14), 0, dp(14));
         mode.setChecked(delivery);
-        mode.setThumbTintList(
-                ColorStateList.valueOf(GOLD)
-        );
-
+        mode.setThumbTintList(ColorStateList.valueOf(GOLD));
+        mode.setEnabled(!busyCart());
         parent.addView(mode);
 
-        TextView modeHint = text(
-                delivery
-                        ? "Привезём по указанному адресу."
-                        : "Самовывоз:\n" + PICKUP,
-                13,
-                MUTED
-        );
+        mode.setOnCheckedChangeListener((v, checked) -> {
+            saveProfile();
+            delivery = checked;
+            clearSelectedSlot();
+            saveProfile();
+            render(true);
+        });
 
-        parent.addView(modeHint);
+        if (delivery) {
+            cityFields(parent);
+            addressInput = input(
+                    parent, "Улица, дом, квартира / полный адрес",
+                    customerAddress,
+                    InputType.TYPE_CLASS_TEXT |
+                            InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
+                    250
+            );
+        } else {
+            parent.addView(text("Самовывоз:\n" + PICKUP, 14, WHITE));
+        }
 
-        LinearLayout deliveryFields =
-                new LinearLayout(this);
-
-        deliveryFields.setOrientation(
-                LinearLayout.VERTICAL
-        );
-
-        parent.addView(
-                deliveryFields,
-                new LinearLayout.LayoutParams(-1, -2)
-        );
-
-        addCitySelector(deliveryFields);
-
-        addressInput = input(
-                deliveryFields,
-                "Полный адрес: город, улица, дом, квартира",
-                customerAddress,
-                InputType.TYPE_CLASS_TEXT |
-                        InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
-                250
-        );
-
-        deliveryFields.addView(text(
-                "Проверьте, что город в адресе соответствует " +
-                "выбранному. Для другого города укажите " +
-                "его название в адресе.",
-                12,
-                MUTED
-        ));
-
-        deliveryFields.setVisibility(
-                delivery ? View.VISIBLE : View.GONE
-        );
-
-        mode.setOnCheckedChangeListener(
-                (view, checked) -> {
-                    delivery = checked;
-
-                    deliveryFields.setVisibility(
-                            checked
-                                    ? View.VISIBLE
-                                    : View.GONE
-                    );
-
-                    modeHint.setText(
-                            checked
-                                    ? "Привезём по указанному адресу."
-                                    : "Самовывоз:\n" + PICKUP
-                    );
-
-                    saveProfile();
-                }
-        );
+        scheduleFields(parent);
 
         commentInput = input(
-                parent,
-                "Комментарий к заказу",
-                customerComment,
+                parent, "Комментарий к заказу", customerComment,
                 InputType.TYPE_CLASS_TEXT |
                         InputType.TYPE_TEXT_FLAG_MULTI_LINE,
                 300
         );
 
         CheckBox agreement = new CheckBox(this);
-
         agreement.setText(
                 "Согласен на передачу имени, телефона и адреса " +
                 "магазину для обработки этого заказа."
         );
-
         agreement.setTextColor(MUTED);
         agreement.setTextSize(13);
-        agreement.setPadding(0, dp(10), 0, dp(10));
-
-        agreement.setButtonTintList(
-                ColorStateList.valueOf(GOLD)
-        );
-
+        agreement.setButtonTintList(ColorStateList.valueOf(GOLD));
         agreement.setChecked(consent);
-
         agreement.setOnCheckedChangeListener(
-                (view, checked) -> consent = checked
+                (v, checked) -> consent = checked
         );
-
         parent.addView(agreement);
+    }
+
+    // -------------------- РАСПИСАНИЕ --------------------
+
+    private Slot parseSlot(JSONObject value) throws Exception {
+        Slot result = new Slot();
+        result.id = value.getString("id");
+        result.date = value.getString("date");
+        result.start = value.getString("startTime");
+        result.end = value.getString("endTime");
+        result.fulfillment = value.getString("fulfillment");
+
+        if (
+                !result.id.matches(SLOT_PATTERN) ||
+                !result.date.matches("\\d{4}-\\d{2}-\\d{2}") ||
+                !result.start.matches("[0-2][0-9]:[0-5][0-9]") ||
+                !result.end.matches("[0-2][0-9]:[0-5][0-9]") ||
+                !Arrays.asList("delivery", "pickup")
+                        .contains(result.fulfillment)
+        ) {
+            throw new Exception("Некорректный интервал");
+        }
+
+        LocalDate.parse(result.date);
+        LocalTime from = LocalTime.parse(result.start);
+        LocalTime to = LocalTime.parse(result.end);
+        if (!from.isBefore(to)) {
+            throw new Exception("Некорректное время");
+        }
+
+        String zone = str(value, "timeZone");
+        if (!zone.isEmpty() && !"Europe/Moscow".equals(zone)) {
+            throw new Exception("Неожиданный часовой пояс");
+        }
+
+        return result;
+    }
+
+    private List<Slot> parseSlots(JSONObject data) throws Exception {
+        JSONArray array = data.getJSONArray("slots");
+        List<Slot> result = new ArrayList<>();
+        Set<String> ids = new HashSet<>();
+
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject value = array.getJSONObject(i);
+            if (!value.optBoolean("enabled", true)) continue;
+
+            Slot slot = parseSlot(value);
+            if (!ids.add(slot.id)) {
+                throw new Exception("Повтор интервала");
+            }
+            result.add(slot);
+        }
+
+        result.sort(Comparator
+                .comparing((Slot s) -> s.date)
+                .thenComparing(s -> s.start)
+                .thenComparing(s -> s.id));
+        return result;
+    }
+
+    private Slot findSlot(String id) {
+        for (Slot slot : slots) {
+            if (slot.id.equals(id)) return slot;
+        }
+        return null;
+    }
+
+    private void clearSelectedSlot() {
+        selectedSlotId = "";
+        selectedSlotSnapshot = null;
+    }
+
+    private void replaceSlots(List<Slot> loaded) {
+        slots.clear();
+        slots.addAll(loaded);
+        slotsLoaded = true;
+        scheduleError = "";
+
+        if (!selectedSlotId.isEmpty()) {
+            Slot latest = findSlot(selectedSlotId);
+
+            if (
+                    latest == null ||
+                    !latest.fulfillment.equals(fulfillment()) ||
+                    !latest.same(selectedSlotSnapshot)
+            ) {
+                clearSelectedSlot();
+                scheduleError =
+                        "Прежний интервал изменился или закрыт. " +
+                        "Выберите время заново либо согласуйте его.";
+            }
+        }
+    }
+
+    private void loadSlots() {
+        if (destroyed || loadingSlots || preparing) return;
+
+        saveProfile();
+        loadingSlots = true;
+        redraw();
+
+        api.loadReceivingSlots(new ShopApi.Callback() {
+            @Override
+            public void onSuccess(JSONObject data) {
+                if (destroyed) return;
+
+                saveProfile();
+                loadingSlots = false;
+
+                try {
+                    replaceSlots(parseSlots(data));
+                } catch (Exception error) {
+                    slotsLoaded = false;
+                    scheduleError = "Не удалось прочитать расписание.";
+                }
+                render(true);
+            }
+
+            @Override
+            public void onError(ShopApi.ApiError error) {
+                if (destroyed) return;
+
+                saveProfile();
+                loadingSlots = false;
+                slotsLoaded = false;
+                scheduleError = error.getMessage();
+                render(true);
+            }
+        });
+    }
+
+    private void scheduleFields(LinearLayout parent) {
+        parent.addView(bold("Дата и время получения", 18, GOLD));
+        parent.addView(text("Московское время, UTC+3.", 13, MUTED));
+
+        Slot selected = selectedSlotSnapshot;
+
+        parent.addView(text(
+                selected != null
+                        ? "Выбрано: " + selected.label()
+                        : "Время будет согласовано с магазином.",
+                15, selected != null ? GOLD : WHITE
+        ));
+
+        if (loadingSlots) {
+            parent.addView(text("Загружаем расписание…", 13, MUTED));
+        }
+
+        if (!scheduleError.isEmpty()) {
+            parent.addView(text(scheduleError, 13, GOLD));
+        }
+
+        Button choose = button(
+                "Выбрать дату и время", this::chooseDate
+        );
+        choose.setEnabled(!busyCart() && !loadingSlots && slotsLoaded);
+        parent.addView(choose);
+
+        if (!selectedSlotId.isEmpty()) {
+            Button clear = secondary(
+                    "Согласовать время с магазином",
+                    () -> {
+                        if (busyCart()) return;
+                        saveProfile();
+                        clearSelectedSlot();
+                        render(true);
+                    }
+            );
+            clear.setEnabled(!busyCart());
+            parent.addView(clear);
+        }
+
+        Button refresh = secondary(
+                loadingSlots ? "Загрузка…" : "Обновить расписание",
+                this::loadSlots
+        );
+        refresh.setEnabled(!busyCart() && !loadingSlots);
+        parent.addView(refresh);
+
+        parent.addView(text(
+                "Если подходящего времени нет, оставьте вариант " +
+                "согласования. Выбранный интервал не заменяет " +
+                "подтверждение магазина. Для других городов " +
+                "возможность доставки согласуется отдельно.",
+                12, MUTED
+        ));
+    }
+
+    private void chooseDate() {
+        if (busyCart() || !slotsLoaded || loadingSlots) return;
+        saveProfile();
+
+        Set<String> unique = new LinkedHashSet<>();
+        for (Slot slot : slots) {
+            if (slot.fulfillment.equals(fulfillment())) {
+                unique.add(slot.date);
+            }
+        }
+
+        if (unique.isEmpty()) {
+            message(
+                    "Нет доступных интервалов",
+                    "Для выбранного способа получения пока нет " +
+                    "открытых интервалов. Можно обновить расписание " +
+                    "или согласовать время с магазином."
+            );
+            return;
+        }
+
+        List<String> dates = new ArrayList<>(unique);
+        String[] labels = new String[dates.size()];
+
+        for (int i = 0; i < dates.size(); i++) {
+            LocalDate date = LocalDate.parse(dates.get(i));
+            labels[i] = String.format(
+                    Locale.ROOT, "%02d.%02d.%04d",
+                    date.getDayOfMonth(),
+                    date.getMonthValue(),
+                    date.getYear()
+            );
+        }
+
+        AlertDialog dialog = dialogBuilder()
+                .setTitle("Выберите дату")
+                .setItems(labels, (d, which) -> chooseTime(dates.get(which)))
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.show();
+        decorate(dialog);
+    }
+
+    private void chooseTime(String date) {
+        if (busyCart() || destroyed) return;
+
+        List<Slot> available = new ArrayList<>();
+        for (Slot slot : slots) {
+            if (
+                    slot.date.equals(date) &&
+                    slot.fulfillment.equals(fulfillment())
+            ) {
+                available.add(slot);
+            }
+        }
+
+        String[] labels = new String[available.size()];
+        for (int i = 0; i < available.size(); i++) {
+            Slot slot = available.get(i);
+            labels[i] = slot.start + "–" + slot.end;
+        }
+
+        AlertDialog dialog = dialogBuilder()
+                .setTitle("Время — UTC+3")
+                .setItems(labels, (d, which) -> {
+                    if (busyCart()) return;
+                    saveProfile();
+                    selectedSlotSnapshot = available.get(which);
+                    selectedSlotId = selectedSlotSnapshot.id;
+                    render(true);
+                })
+                .setNegativeButton("Отмена", null)
+                .create();
+        dialog.show();
+        decorate(dialog);
+    }
+
+    private String slotText(JSONObject order) {
+        JSONObject value = order.optJSONObject("receivingSlot");
+
+        if (value != null) {
+            try {
+                Slot slot = parseSlot(value);
+                if (!slot.fulfillment.equals(order.optString("fulfillment"))) {
+                    throw new Exception("Другой способ получения");
+                }
+                return "Дата и время: " + slot.label() +
+                        "\nМосковское время, UTC+3.";
+            } catch (Exception ignored) {
+                return "Дата и время: уточните у магазина.";
+            }
+        }
+
+        return "Дата и время: по согласованию с магазином.";
+    }
+
+    // -------------------- КОРЗИНА --------------------
+
+    private void showCart() {
+        section("Корзина");
+
+        if (pending != null) {
+            LinearLayout notice = panel();
+            notice.addView(bold("Проверим прежний заказ", 20, GOLD));
+            notice.addView(text(
+                    "Результат предыдущей отправки не подтверждён. " +
+                    "Проверка отправляет прежний запрос без изменения " +
+                    "идентификатора, города и выбранного интервала.",
+                    14, WHITE
+            ));
+            Button retry = button(
+                    sending ? "Проверяем…" : "Проверить прежний заказ",
+                    this::confirmPending
+            );
+            retry.setEnabled(!sending && !preparing && repeatingId == null);
+            notice.addView(retry);
+        }
+
+        if (cart.isEmpty()) {
+            LinearLayout empty = panel();
+            empty.addView(bold("Пока здесь пусто", 22, WHITE));
+            empty.addView(button(
+                    "Открыть каталог", () -> openCatalog(false)
+            ));
+            return;
+        }
+
+        for (String id : new ArrayList<>(cart.keySet())) {
+            Product p = findProduct(id);
+            LinearLayout item = panel();
+
+            if (p == null) {
+                item.addView(text(
+                        "Товар временно недоступен в каталоге.", 15, GOLD
+                ));
+
+                if (!busyCart()) {
+                    item.addView(secondary(
+                            "Убрать недоступный товар",
+                            () -> {
+                                if (busyCart()) return;
+                                cart.remove(id);
+                                saveCart();
+                                redraw();
+                            }
+                    ));
+                }
+                continue;
+            }
+
+            item.addView(
+                    new ProductPhoto(this, p.name, p.category, p.imageUrl),
+                    new LinearLayout.LayoutParams(-1, dp(150))
+            );
+            badge(item, p);
+            item.addView(bold(p.name, 20, WHITE));
+            prices(item, p, 18);
+
+            if (!kg(p) && halves(id) % 2 != 0) {
+                item.addView(text(
+                        "Единица продажи изменилась. Исправьте " +
+                        "количество кнопкой «+» или «−».", 14, GOLD
+                ));
+            }
+
+            quantityControls(item, p);
+            item.addView(bold(
+                    "Сумма: " + money(lineTotal(p)), 18, GOLD
+            ));
+        }
+
+        LinearLayout summary = panel();
+        summary.addView(bold("Товары: " + money(total()), 25, GOLD));
+        summary.addView(text(
+                "Акционные цены уже учтены. Оплата при получении.",
+                13, MUTED
+        ));
+        summary.addView(text(DELIVERY, 14, MUTED));
+
+        if (pending != null) return;
+
+        summary.addView(bold("Данные для заказа", 20, WHITE));
+        customerFields(summary, true);
+
+        Button send = button(
+                sending ? "Отправляем…" :
+                preparing ? "Проверяем…" : "Оформить заказ",
+                this::prepareOrder
+        );
+        send.setEnabled(
+                freshCatalog && !loadingCatalog && !busyCart()
+        );
+        summary.addView(send);
+
+        Button clear = secondary("Очистить корзину", () -> {
+            if (busyCart()) return;
+            AlertDialog dialog = dialogBuilder()
+                    .setTitle("Очистить корзину?")
+                    .setNegativeButton("Оставить", null)
+                    .setPositiveButton("Очистить", (d, which) -> {
+                        if (busyCart()) return;
+                        saveProfile();
+                        cart.clear();
+                        saveCart();
+                        render(false);
+                    })
+                    .create();
+            dialog.show();
+            decorate(dialog);
+        });
+        clear.setEnabled(!busyCart());
+        summary.addView(clear);
     }
 
     // -------------------- ПРОФИЛЬ --------------------
 
     private void showProfile() {
         section("Мой профиль");
-
         LinearLayout profile = panel();
-
-        profile.addView(bold(
-                "Данные покупателя",
-                21,
-                WHITE
-        ));
-
+        profile.addView(bold("Данные покупателя", 21, WHITE));
         profile.addView(text(
-                "Сохраняются на этом телефоне. " +
-                "Регистрация на сервере не используется.",
-                13,
-                MUTED
+                "Хранятся на этом телефоне. Регистрация " +
+                "на сервере не используется.", 13, MUTED
         ));
 
         customerFields(profile, false);
-
-        profile.addView(button(
-                "Сохранить данные",
-                () -> {
-                    saveProfile();
-
-                    message(
-                            "Данные сохранены",
-                            "При следующем заказе поля будут " +
-                            "заполнены автоматически."
-                    );
-                }
-        ));
+        profile.addView(button("Сохранить данные", () -> {
+            saveProfile();
+            message("Данные сохранены", "Они будут доступны при оформлении.");
+        }));
 
         LinearLayout orders = panel();
-
-        orders.addView(bold(
-                "Мои заказы",
-                21,
-                GOLD
-        ));
-
+        orders.addView(bold("Мои заказы", 21, GOLD));
         orders.addView(text(
                 historyReadable
-                        ? "Заказов на этом телефоне: " +
-                          orderHistory.length()
+                        ? "Заказов на телефоне: " + history.length()
                         : "Не удалось прочитать локальную историю.",
-                15,
-                WHITE
+                15, WHITE
         ));
-
-        orders.addView(button(
-                "Открыть историю заказов",
-                this::openHistory
-        ));
-
+        orders.addView(button("История заказов", this::openHistory));
         orders.addView(text(
-                "История хранится на этом телефоне. " +
-                "После удаления приложения она не восстановится. " +
-                "Повтор заказа переносит товары в корзину " +
-                "по текущим ценам.",
-                13,
-                MUTED
+                "После удаления приложения история и ключи " +
+                "просмотра заказов не восстановятся.",
+                13, MUTED
         ));
 
-        String last = prefs.getString(
-                "last_order_v2",
-                ""
-        );
-
+        String last = prefs.getString("last_order_v2", "");
         if (!last.isEmpty()) {
-            orders.addView(bold(
-                    "Последний подтверждённый заказ",
-                    17,
-                    WHITE
-            ));
-
+            orders.addView(bold("Последний заказ", 17, WHITE));
             orders.addView(text(last, 15, WHITE));
         }
 
-        if (pendingOrder != null) {
+        if (pending != null) {
             orders.addView(button(
-                    "Проверить неподтверждённый заказ",
-                    () -> openTab(3)
+                    "Проверить неподтверждённый заказ", () -> openTab(3)
             ));
         }
 
         LinearLayout shop = panel();
-
-        shop.addView(bold(
-                "Наш магазин",
-                20,
-                GOLD
-        ));
-
+        shop.addView(bold("Наш магазин", 20, GOLD));
         shop.addView(text(PICKUP, 16, WHITE));
         shop.addView(text(DELIVERY, 14, MUTED));
-
         shop.addView(text(
-                "Оплата при получении. Подтверждение " +
-                "и детали заказа согласует продавец.",
-                14,
-                MUTED
+                "Даты и интервалы указаны по московскому времени. " +
+                "Детали заказа подтверждает продавец.",
+                14, MUTED
         ));
     }
 
-    private String statusName(String status) {
-        switch (status) {
-            case "new":
-                return "Новый";
-            case "confirmed":
-                return "Подтверждён";
-            case "preparing":
-                return "Собирается";
-            case "delivering":
-                return "В доставке";
-            case "ready":
-                return "Готов к самовывозу";
-            case "completed":
-                return "Выполнен";
-            case "cancelled":
-                return "Отменён";
-            default:
-                return "Статус уточняется";
+    // -------------------- ИСТОРИЯ --------------------
+
+    private String statusName(String value) {
+        switch (value) {
+            case "new": return "Новый";
+            case "confirmed": return "Подтверждён";
+            case "preparing": return "Собирается";
+            case "delivering": return "В доставке";
+            case "ready": return "Готов к самовывозу";
+            case "completed": return "Выполнен";
+            case "cancelled": return "Отменён";
+            default: return "Статус уточняется";
         }
     }
 
     private boolean knownStatus(String value) {
         return Arrays.asList(
-                "new",
-                "confirmed",
-                "preparing",
-                "delivering",
-                "ready",
-                "completed",
-                "cancelled"
+                "new", "confirmed", "preparing", "delivering",
+                "ready", "completed", "cancelled"
         ).contains(value);
     }
 
     private String orderTitle(JSONObject order) {
-        long number = order.optLong(
-                "orderNumber",
-                0
-        );
-
-        return number > 0
-                ? "Заказ № " + number
-                : "Заказ сохранён";
+        long number = order.optLong("orderNumber", 0);
+        return number > 0 ? "Заказ № " + number : "Заказ сохранён";
     }
 
-    private String displayDate(String value) {
+    private String dateText(String value) {
         try {
             return DateFormat.getDateTimeInstance(
-                    DateFormat.SHORT,
-                    DateFormat.SHORT,
+                    DateFormat.SHORT, DateFormat.SHORT,
                     new Locale("ru", "RU")
-            ).format(
-                    Date.from(Instant.parse(value))
-            );
-
+            ).format(Date.from(Instant.parse(value)));
         } catch (Exception error) {
             return "Дата уточняется";
         }
     }
 
-    private String checkedDate(long millis) {
-        return DateFormat.getDateTimeInstance(
-                DateFormat.SHORT,
-                DateFormat.SHORT,
-                new Locale("ru", "RU")
-        ).format(new Date(millis));
-    }
-
     private JSONObject historyOrder(String id) {
-        for (int i = 0; i < orderHistory.length(); i++) {
-            JSONObject item =
-                    orderHistory.optJSONObject(i);
-
-            if (
-                    item != null &&
-                    id.equals(item.optString("id"))
-            ) {
-                return item;
+        for (int i = 0; i < history.length(); i++) {
+            JSONObject value = history.optJSONObject(i);
+            if (value != null && id.equals(value.optString("id"))) {
+                return value;
             }
         }
-
         return null;
     }
 
-    private JSONArray historyWith(
-            JSONObject replacement,
-            boolean putFirst
-    ) throws Exception {
-        if (!historyReadable) {
-            throw new Exception("История не прочитана");
-        }
+    private JSONArray historyWith(JSONObject replacement, boolean first)
+            throws Exception {
+        if (!historyReadable) throw new Exception("История не прочитана");
 
         String id = replacement.getString("id");
         JSONArray result = new JSONArray();
-        boolean replaced = false;
+        boolean found = false;
 
-        if (putFirst) {
+        if (first) {
             result.put(replacement);
-            replaced = true;
+            found = true;
         }
 
-        for (int i = 0;
-             i < orderHistory.length();
-             i++) {
-
-            JSONObject item =
-                    orderHistory.getJSONObject(i);
-
+        for (int i = 0; i < history.length(); i++) {
+            JSONObject item = history.getJSONObject(i);
             if (id.equals(item.getString("id"))) {
-                if (!putFirst) {
+                if (!first) {
                     result.put(replacement);
-                    replaced = true;
+                    found = true;
                 }
             } else {
                 result.put(item);
             }
         }
 
-        if (!replaced) {
-            result.put(replacement);
-        }
-
+        if (!found) result.put(replacement);
         return result;
     }
 
     private boolean canTrack(JSONObject order) {
-        return order.optBoolean(
-                "trackingAvailable",
-                false
-        ) &&
-                order.optString("id", "")
-                        .matches(ORDER_ID_PATTERN) &&
-                order.optString("orderAccessToken", "")
+        return order.optBoolean("trackingAvailable", false) &&
+                order.optString("id").matches(ORDER_PATTERN) &&
+                order.optString("orderAccessToken")
                         .matches("[0-9a-f]{64}");
     }
 
-    // -------------------- ИСТОРИЯ --------------------
-
     private void showHistory() {
         content.addView(secondary(
-                "← Назад в профиль",
-                () -> openTab(4)
+                "← Назад в профиль", () -> openTab(4)
         ));
-
         section("Мои заказы");
 
         LinearLayout notice = panel();
-
         notice.addView(text(
-                "Обновление статуса не создаёт заказ. Кнопка " +
-                "«Повторить заказ» только подготавливает корзину: " +
-                "отправку вы подтверждаете отдельно.",
-                14,
-                MUTED
+                "Обновление статуса не создаёт заказ. Повтор " +
+                "только переносит товары в корзину по текущим ценам.",
+                14, MUTED
         ));
 
         if (!historyReadable) {
             notice.addView(text(
-                    "Не удалось прочитать сохранённую историю. " +
-                    "Она не удалена и не перезаписана. " +
-                    "Не удаляйте приложение. " +
-                    "Свяжитесь с магазином.",
-                    15,
-                    GOLD
+                    "История не прочитана и не перезаписана. " +
+                    "Не удаляйте приложение. Свяжитесь с магазином.",
+                    15, GOLD
             ));
             return;
         }
 
-        if (pendingOrder != null) {
+        if (pending != null) {
             notice.addView(button(
-                    "Проверить неподтверждённую отправку",
-                    () -> openTab(3)
+                    "Проверить прежнюю отправку", () -> openTab(3)
             ));
         }
 
-        if (orderHistory.length() == 0) {
-            LinearLayout empty = panel();
-
-            empty.addView(bold(
-                    "Пока нет заказов",
-                    22,
-                    WHITE
-            ));
-
-            empty.addView(text(
-                    "Новый заказ появится здесь после " +
-                    "подтверждения сервера. Прежние заказы без " +
-                    "ключа просмотра автоматически не переносятся.",
-                    15,
-                    MUTED
-            ));
-
-            empty.addView(button(
-                    "Открыть каталог",
-                    this::openFullCatalog
+        if (history.length() == 0) {
+            panel().addView(text(
+                    "Пока нет заказов. Новые записи появятся после " +
+                    "подтверждения сервера.", 16, MUTED
             ));
             return;
         }
 
-        for (int i = 0;
-             i < orderHistory.length();
-             i++) {
-
-            JSONObject order =
-                    orderHistory.optJSONObject(i);
-
+        for (int i = 0; i < history.length(); i++) {
+            JSONObject order = history.optJSONObject(i);
             if (order == null) continue;
-
             final String id = order.optString("id");
 
             LinearLayout card = panel();
-
-            card.addView(bold(
-                    orderTitle(order),
-                    23,
-                    GOLD
-            ));
-
+            card.addView(bold(orderTitle(order), 23, GOLD));
             card.addView(text(
-                    (order.optBoolean(
-                            "serverSnapshot",
-                            false
-                    )
-                            ? "Оформлен: "
-                            : "Получено подтверждение на телефоне: ") +
-                    displayDate(
-                            order.optString("createdAt")
-                    ),
-                    13,
-                    MUTED
+                    (order.optBoolean("serverSnapshot", false)
+                            ? "Оформлен: " : "Подтверждён на телефоне: ") +
+                    dateText(order.optString("createdAt")),
+                    13, MUTED
             ));
-
             card.addView(bold(
-                    "Статус: " +
-                    statusName(order.optString("status")),
-                    19,
-                    WHITE
+                    "Статус: " + statusName(order.optString("status")),
+                    19, WHITE
             ));
 
-            long checkedAt = order.optLong(
-                    "checkedAt",
-                    0
-            );
-
-            if (checkedAt > 0) {
+            long checked = order.optLong("checkedAt", 0);
+            if (checked > 0) {
                 card.addView(text(
-                        "Последнее подтверждение статуса: " +
-                        checkedDate(checkedAt),
-                        12,
-                        MUTED
+                        "Последняя проверка: " +
+                        dateText(Instant.ofEpochMilli(checked).toString()),
+                        12, MUTED
                 ));
             }
 
-            boolean pickup = "pickup".equals(
-                    order.optString("fulfillment")
-            );
+            card.addView(text(receivingDescription(order), 14, MUTED));
+            card.addView(text(slotText(order), 15, GOLD));
 
-            card.addView(text(
-                    pickup
-                            ? "Получение: самовывоз"
-                            : "Получение: доставка",
-                    14,
-                    MUTED
-            ));
-
-            if (pickup) {
-                card.addView(text(
-                        PICKUP,
-                        14,
-                        MUTED
-                ));
-
-            } else {
-                String city = stringValue(
-                        order,
-                        "deliveryCity"
-                );
-
-                String address = stringValue(
-                        order,
-                        "address"
-                );
-
-                card.addView(text(
-                        city.isEmpty()
-                                ? "Город доставки не сохранён " +
-                                  "в этой записи."
-                                : "Город: " + city,
-                        14,
-                        MUTED
-                ));
-
-                if (!address.isEmpty()) {
-                    card.addView(text(
-                            address,
-                            14,
-                            MUTED
-                    ));
-                }
-            }
-
-            JSONArray items =
-                    order.optJSONArray("items");
-
+            JSONArray items = order.optJSONArray("items");
             if (items != null) {
-                for (int j = 0;
-                     j < items.length();
-                     j++) {
-
-                    JSONObject item =
-                            items.optJSONObject(j);
-
+                for (int j = 0; j < items.length(); j++) {
+                    JSONObject item = items.optJSONObject(j);
                     if (item == null) continue;
 
-                    double quantity =
-                            item.optDouble("quantity", 0);
+                    double q = item.optDouble("quantity", 0);
+                    String line = item.optString("name", "Товар");
 
-                    String line = item.optString(
-                            "name",
-                            "Товар"
-                    );
-
-                    if (
-                            Double.isFinite(quantity) &&
-                            quantity > 0
-                    ) {
-                        line += " — " +
-                                quantityFormat.format(quantity) +
-                                " " +
-                                item.optString("unit", "");
+                    if (Double.isFinite(q) && q > 0) {
+                        line += " — " + quantityFormat.format(q) +
+                                " " + item.optString("unit");
                     }
 
-                    if (
-                            order.optBoolean(
-                                    "serverSnapshot",
-                                    false
-                            ) &&
-                            item.has("totalRub")
-                    ) {
+                    if (order.optBoolean("serverSnapshot", false)) {
                         try {
-                            line += " — " +
-                                    money(responseKopecks(item));
+                            line += " — " + money(responseKopecks(item));
                         } catch (Exception ignored) {
                         }
                     }
-
-                    card.addView(text(
-                            line,
-                            15,
-                            WHITE
-                    ));
+                    card.addView(text(line, 15, WHITE));
                 }
             }
 
             card.addView(bold(
-                    "Товары: " + orderMoney(order),
-                    22,
-                    GOLD
+                    "Товары: " + orderMoney(order), 22, GOLD
             ));
 
-            if (!order.optBoolean(
-                    "serverSnapshot",
-                    false
-            )) {
+            JSONObject info = order.optJSONObject("deliveryInfo");
+            String terms = info == null ? "" : str(info, "message");
+            card.addView(text(
+                    terms.isEmpty()
+                            ? "Условия доставки относятся к оформленному " +
+                              "заказу и согласуются с магазином."
+                            : terms,
+                    13, MUTED
+            ));
+
+            if (!order.optBoolean("serverSnapshot", false)) {
                 card.addView(text(
-                        "Для сохранённого магазином состава " +
-                        "нажмите «Обновить статус». При повторе " +
-                        "приложение также попробует получить " +
-                        "этот состав.",
-                        12,
-                        MUTED
+                        "Нажмите «Обновить статус», чтобы получить " +
+                        "сохранённый магазином состав и время.",
+                        12, MUTED
                 ));
             }
 
-            /*
-             * Здесь не пересчитываем условия старого заказа
-             * по сегодняшнему городу или текущей корзине.
-             */
-            card.addView(text(
-                    "Оплата при получении. Условия доставки " +
-                    "относятся к оформленному заказу; " +
-                    "стоимость платной доставки " +
-                    "согласуется отдельно.",
-                    13,
-                    MUTED
-            ));
-
             if (canTrack(order)) {
-                boolean busy =
-                        refreshingOrders.contains(id);
-
                 Button refresh = button(
-                        busy
-                                ? "Обновляем…"
-                                : "Обновить статус",
+                        refreshing.contains(id)
+                                ? "Обновляем…" : "Обновить статус",
                         () -> refreshOrder(id)
                 );
-
                 refresh.setEnabled(
-                        !busy && !repeating()
+                        !refreshing.contains(id) &&
+                        repeatingId == null && !preparing
                 );
-
                 card.addView(refresh);
-
             } else {
                 card.addView(text(
-                        "Нет ключа просмотра статуса. " +
-                        "Для проверки этого заказа свяжитесь " +
-                        "с магазином. Не используйте повтор " +
-                        "для проверки отправки.",
-                        13,
-                        GOLD
+                        "Нет ключа просмотра. Уточните статус у магазина.",
+                        13, GOLD
                 ));
             }
 
             Button repeat = secondary(
-                    id.equals(repeatingOrderId)
-                            ? "Подготавливаем…"
-                            : "Повторить заказ",
+                    id.equals(repeatingId)
+                            ? "Подготавливаем…" : "Повторить заказ",
                     () -> repeatOrder(id)
             );
-
             repeat.setEnabled(
-                    !sending &&
-                    pendingOrder == null &&
-                    !repeating() &&
-                    !loading &&
-                    refreshingOrders.isEmpty()
+                    !busyCart() && !loadingCatalog && refreshing.isEmpty()
             );
-
             card.addView(repeat);
         }
     }
 
-    private void validateSnapshotItems(
-            JSONArray items
-    ) throws Exception {
-        if (
-                items.length() < 1 ||
-                items.length() > 100
-        ) {
+    private String receivingDescription(JSONObject order) {
+        if ("pickup".equals(order.optString("fulfillment"))) {
+            return "Самовывоз:\n" + PICKUP;
+        }
+
+        String selectedCity = str(order, "deliveryCity");
+        return "Доставка:\n" +
+                (selectedCity.isEmpty() ? "" : "Город: " + selectedCity + "\n") +
+                str(order, "address");
+    }
+
+    private void validateItems(JSONArray items) throws Exception {
+        if (items.length() < 1 || items.length() > 100) {
             throw new Exception("Некорректный состав");
         }
 
         Set<String> ids = new HashSet<>();
-
-        for (int i = 0;
-             i < items.length();
-             i++) {
-
-            JSONObject item =
-                    items.getJSONObject(i);
-
-            String productId =
-                    item.getString("productId");
-
-            double quantity =
-                    item.getDouble("quantity");
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.getJSONObject(i);
+            String id = item.getString("productId");
+            double q = item.getDouble("quantity");
 
             if (
-                    !productId.matches("[a-z0-9_-]{1,80}") ||
-                    !ids.add(productId) ||
-                    !Double.isFinite(quantity) ||
-                    quantity < 0.5 ||
-                    quantity > 50 ||
-                    quantity * 2 != Math.rint(quantity * 2) ||
+                    !id.matches("[a-z0-9_-]{1,80}") ||
+                    !ids.add(id) ||
+                    !Double.isFinite(q) || q < 0.5 || q > 50 ||
+                    q * 2 != Math.rint(q * 2) ||
                     item.getString("name").trim().isEmpty() ||
                     item.getString("unit").trim().isEmpty()
             ) {
                 throw new Exception("Некорректная позиция");
             }
-
             responseKopecks(item);
         }
     }
 
-    private JSONObject storeRemoteOrder(
-            String id,
-            JSONObject data
+    private void copyReceivingSlot(
+            JSONObject destination, JSONObject source
     ) throws Exception {
-        JSONObject remote =
-                data.getJSONObject("order");
+        if (!source.has("receivingSlot")) return;
 
+        if (source.isNull("receivingSlot")) {
+            destination.put("receivingSlot", JSONObject.NULL);
+            return;
+        }
+
+        Slot slot = parseSlot(source.getJSONObject("receivingSlot"));
+        if (!slot.fulfillment.equals(destination.optString("fulfillment"))) {
+            throw new Exception("Несовпадение способа получения");
+        }
+        destination.put("receivingSlot", slot.json());
+    }
+
+    private JSONObject storeRemote(String id, JSONObject data)
+            throws Exception {
+        JSONObject remote = data.getJSONObject("order");
         if (!id.equals(remote.getString("id"))) {
             throw new Exception("Другой заказ");
         }
 
         responseKopecks(remote);
-
         String status = remote.getString("status");
-
-        if (!knownStatus(status)) {
-            throw new Exception("Неизвестный статус");
-        }
-
-        String fulfillment =
-                remote.getString("fulfillment");
+        String method = remote.getString("fulfillment");
 
         if (
-                !Arrays.asList("delivery", "pickup")
-                        .contains(fulfillment)
+                !knownStatus(status) ||
+                !Arrays.asList("delivery", "pickup").contains(method)
         ) {
-            throw new Exception("Некорректное получение");
+            throw new Exception("Некорректный ответ");
         }
 
         JSONArray items = remote.getJSONArray("items");
-        validateSnapshotItems(items);
-
+        validateItems(items);
         JSONObject current = historyOrder(id);
+        if (current == null) throw new Exception("Нет записи");
 
-        if (current == null) {
-            throw new Exception("Нет локальной записи");
-        }
-
-        JSONObject updated =
-                new JSONObject(current.toString());
-
-        updated.put(
-                "orderNumber",
-                remote.getLong("orderNumber")
-        );
-
-        updated.put(
-                "createdAt",
-                remote.getString("createdAt")
-        );
-
-        updated.put(
-                "updatedAt",
-                remote.optString("updatedAt")
-        );
-
-        updated.put("fulfillment", fulfillment);
+        JSONObject updated = new JSONObject(current.toString());
+        updated.put("orderNumber", remote.getLong("orderNumber"));
+        updated.put("createdAt", remote.getString("createdAt"));
+        updated.put("updatedAt", remote.optString("updatedAt"));
+        updated.put("fulfillment", method);
         updated.put("items", items);
         updated.put("totalRub", remote.get("totalRub"));
         updated.put("status", status);
-
-        updated.put(
-                "checkedAt",
-                System.currentTimeMillis()
-        );
-
+        updated.put("checkedAt", System.currentTimeMillis());
         updated.put("serverSnapshot", true);
 
-        /*
-         * Если сервер отдаёт город и адрес, используем их.
-         * Если старый ответ этих полей не содержит,
-         * локально сохранённые значения не затираем.
-         */
-        if (
-                remote.has("deliveryCity") &&
-                !remote.isNull("deliveryCity")
-        ) {
-            updated.put(
-                    "deliveryCity",
-                    stringValue(remote, "deliveryCity")
-            );
+        if (remote.has("deliveryCity")) {
+            updated.put("deliveryCity", str(remote, "deliveryCity"));
+        }
+        if (remote.has("address")) {
+            updated.put("address", str(remote, "address"));
+        }
+        if (remote.optJSONObject("deliveryInfo") != null) {
+            updated.put("deliveryInfo", remote.getJSONObject("deliveryInfo"));
         }
 
-        if (
-                remote.has("address") &&
-                !remote.isNull("address")
-        ) {
-            updated.put(
-                    "address",
-                    stringValue(remote, "address")
-            );
+        copyReceivingSlot(updated, remote);
+
+        JSONArray next = historyWith(updated, false);
+        if (!prefs.edit().putString(HISTORY_KEY, next.toString()).commit()) {
+            throw new Exception("Не удалось сохранить историю");
         }
 
-        JSONArray next =
-                historyWith(updated, false);
-
-        if (!prefs.edit()
-                .putString(
-                        HISTORY_KEY,
-                        next.toString()
-                )
-                .commit()) {
-            throw new Exception(
-                    "Не удалось сохранить историю"
-            );
-        }
-
-        orderHistory = next;
+        history = next;
         return updated;
     }
 
     private void refreshOrder(String id) {
         if (
-                destroyed ||
-                repeating() ||
-                refreshingOrders.contains(id)
-        ) {
-            return;
-        }
+                destroyed || refreshing.contains(id) ||
+                repeatingId != null || preparing
+        ) return;
 
         JSONObject local = historyOrder(id);
-
-        if (
-                local == null ||
-                !canTrack(local)
-        ) {
-            message(
-                    "Статус заказа",
-                    "На телефоне нет ключа просмотра " +
-                    "этого заказа."
-            );
+        if (local == null || !canTrack(local)) {
+            message("Статус", "Нет ключа просмотра этого заказа.");
             return;
         }
 
-        refreshingOrders.add(id);
+        refreshing.add(id);
         redraw();
 
         api.loadOrder(
-                id,
-                local.optString("orderAccessToken"),
+                id, local.optString("orderAccessToken"),
                 new ShopApi.Callback() {
                     @Override
                     public void onSuccess(JSONObject data) {
                         if (destroyed) return;
-
-                        refreshingOrders.remove(id);
+                        refreshing.remove(id);
 
                         try {
-                            JSONObject updated =
-                                    storeRemoteOrder(id, data);
-
+                            JSONObject updated = storeRemote(id, data);
                             redraw();
-
                             Toast.makeText(
                                     StoreActivity.this,
                                     "Статус: " +
-                                    statusName(
-                                            updated.optString("status")
-                                    ),
+                                    statusName(updated.optString("status")),
                                     Toast.LENGTH_SHORT
                             ).show();
-
                         } catch (Exception error) {
                             redraw();
-
                             message(
-                                    "История заказов",
+                                    "История",
                                     "Не удалось прочитать или сохранить " +
-                                    "обновление. Прежняя запись оставлена " +
-                                    "без изменений. Повторите позже."
+                                    "ответ. Прежняя запись оставлена."
                             );
                         }
                     }
 
                     @Override
-                    public void onError(
-                            ShopApi.ApiError error
-                    ) {
+                    public void onError(ShopApi.ApiError error) {
                         if (destroyed) return;
-
-                        refreshingOrders.remove(id);
+                        refreshing.remove(id);
                         redraw();
-
-                        message(
-                                "Не удалось обновить статус",
-                                error.getMessage() +
-                                "\n\nПроверка статуса " +
-                                "не создаёт новый заказ."
-                        );
+                        message("Проверка статуса", error.getMessage());
                     }
                 }
         );
@@ -2964,496 +2155,241 @@ public class StoreActivity extends Activity {
     // -------------------- ПОВТОР ЗАКАЗА --------------------
 
     private void repeatOrder(String id) {
-        if (
-                destroyed ||
-                isFinishing() ||
-                repeating()
-        ) {
-            return;
-        }
-
-        if (pendingOrder != null || sending) {
+        if (busyCart() || loadingCatalog || !refreshing.isEmpty()) {
             message(
-                    "Сначала проверьте прежнюю отправку",
-                    "В корзине есть неподтверждённый заказ. " +
-                    "Проверьте его отправку, чтобы избежать дубля."
-            );
-            return;
-        }
-
-        if (
-                loading ||
-                !refreshingOrders.isEmpty()
-        ) {
-            message(
-                    "Подождите",
-                    "Дождитесь окончания обновления " +
-                    "каталога или статуса."
-            );
-            return;
-        }
-
-        if (!historyReadable) {
-            message(
-                    "История",
-                    "Не удалось прочитать историю заказов."
+                    "Повтор заказа",
+                    "Сначала завершите текущую проверку " +
+                    "или проверьте прежнюю отправку."
             );
             return;
         }
 
         JSONObject local = historyOrder(id);
+        if (!historyReadable || local == null) return;
 
-        if (local == null) {
+        if (!local.optBoolean("serverSnapshot", false) && !canTrack(local)) {
             message(
                     "Повтор заказа",
-                    "Запись заказа не найдена."
-            );
-            return;
-        }
-
-        if (
-                !local.optBoolean(
-                        "serverSnapshot",
-                        false
-                ) &&
-                !canTrack(local)
-        ) {
-            message(
-                    "Нельзя безопасно повторить",
-                    "Для этого заказа нет подтверждённого состава " +
-                    "с единицами продажи и нет ключа его просмотра. " +
-                    "Выберите товары вручную в каталоге. " +
-                    "Старая корзина не изменена."
+                    "Нет подтверждённого состава и ключа просмотра. " +
+                    "Выберите товары вручную. Корзина не изменена."
             );
             return;
         }
 
         saveProfile();
-        repeatingOrderId = id;
+        repeatingId = id;
         render(true);
 
-        if (local.optBoolean(
-                "serverSnapshot",
-                false
-        )) {
-            fetchCatalogForRepeat(id);
+        if (local.optBoolean("serverSnapshot", false)) {
+            fetchRepeatCatalog(id);
             return;
         }
 
         api.loadOrder(
-                id,
-                local.optString("orderAccessToken"),
+                id, local.optString("orderAccessToken"),
                 new ShopApi.Callback() {
                     @Override
                     public void onSuccess(JSONObject data) {
-                        if (
-                                destroyed ||
-                                !id.equals(repeatingOrderId)
-                        ) {
-                            return;
-                        }
-
+                        if (destroyed || !id.equals(repeatingId)) return;
                         try {
-                            storeRemoteOrder(id, data);
-                            fetchCatalogForRepeat(id);
-
+                            storeRemote(id, data);
+                            fetchRepeatCatalog(id);
                         } catch (Exception error) {
-                            failRepeat(
-                                    "Не удалось получить или сохранить " +
-                                    "подтверждённый состав старого заказа."
-                            );
+                            failRepeat("Не удалось получить состав заказа.");
                         }
                     }
 
                     @Override
-                    public void onError(
-                            ShopApi.ApiError error
-                    ) {
-                        if (
-                                destroyed ||
-                                !id.equals(repeatingOrderId)
-                        ) {
-                            return;
-                        }
-
+                    public void onError(ShopApi.ApiError error) {
+                        if (destroyed || !id.equals(repeatingId)) return;
                         failRepeat(error.getMessage());
                     }
                 }
         );
     }
 
-    private void fetchCatalogForRepeat(String id) {
-        if (
-                destroyed ||
-                !id.equals(repeatingOrderId)
-        ) {
-            return;
-        }
-
-        loading = true;
+    private void fetchRepeatCatalog(String id) {
+        loadingCatalog = true;
         freshCatalog = false;
         redraw();
 
         api.loadProducts(new ShopApi.Callback() {
             @Override
             public void onSuccess(JSONObject data) {
-                if (
-                        destroyed ||
-                        !id.equals(repeatingOrderId)
-                ) {
-                    return;
-                }
+                if (destroyed || !id.equals(repeatingId)) return;
 
                 try {
-                    List<Product> loaded =
-                            parseCatalog(data);
-
+                    List<Product> loaded = parseCatalog(data);
                     saveProfile();
                     products.clear();
                     products.addAll(loaded);
-                    loading = false;
+                    loadingCatalog = false;
                     freshCatalog = true;
 
-                    JSONObject source =
-                            historyOrder(id);
-
-                    if (source == null) {
-                        throw new Exception(
-                                "Запись заказа не найдена"
-                        );
-                    }
-
-                    RepeatPlan plan =
-                            buildRepeatPlan(source);
+                    JSONObject source = historyOrder(id);
+                    if (source == null) throw new Exception("Нет заказа");
+                    RepeatPlan plan = buildRepeat(source);
 
                     if (plan.quantities.isEmpty()) {
-                        String details =
-                                plan.skipped.isEmpty()
-                                        ? ""
-                                        : "\n\n" +
-                                          joinLines(plan.skipped);
-
                         failRepeat(
-                                "В старом заказе не осталось товаров, " +
-                                "которые можно перенести без изменения " +
-                                "единиц и количества." + details
+                                "Нет доступных товаров для переноса.\n\n" +
+                                join(plan.skipped)
                         );
                         return;
                     }
-
                     render(true);
-                    showRepeatConfirmation(
-                            id,
-                            source,
-                            plan
-                    );
+                    confirmRepeat(id, source, plan);
 
                 } catch (Exception error) {
-                    loading = false;
-
-                    failRepeat(
-                            "Не удалось подготовить повтор. " +
-                            "Проверьте каталог и сохранённый " +
-                            "состав заказа."
-                    );
+                    loadingCatalog = false;
+                    failRepeat("Не удалось подготовить повтор заказа.");
                 }
             }
 
             @Override
-            public void onError(
-                    ShopApi.ApiError error
-            ) {
-                if (
-                        destroyed ||
-                        !id.equals(repeatingOrderId)
-                ) {
-                    return;
-                }
-
-                loading = false;
+            public void onError(ShopApi.ApiError error) {
+                if (destroyed || !id.equals(repeatingId)) return;
+                loadingCatalog = false;
                 freshCatalog = false;
-
                 failRepeat(error.getMessage());
             }
         });
     }
 
-    private RepeatPlan buildRepeatPlan(
-            JSONObject order
-    ) throws Exception {
-        if (!order.optBoolean(
-                "serverSnapshot",
-                false
-        )) {
-            throw new Exception(
-                    "Нет подтверждённого состава"
-            );
-        }
+    private RepeatPlan buildRepeat(JSONObject source) throws Exception {
+        JSONArray items = source.getJSONArray("items");
+        validateItems(items);
+        RepeatPlan result = new RepeatPlan();
 
-        JSONArray items =
-                order.getJSONArray("items");
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject old = items.getJSONObject(i);
+            Product p = findProduct(old.getString("productId"));
+            String name = old.getString("name");
+            String oldUnit = unit(old.getString("unit"));
+            int value = (int) Math.round(old.getDouble("quantity") * 2);
 
-        validateSnapshotItems(items);
-
-        RepeatPlan plan = new RepeatPlan();
-
-        for (int i = 0;
-             i < items.length();
-             i++) {
-
-            JSONObject old =
-                    items.getJSONObject(i);
-
-            String id =
-                    old.getString("productId");
-
-            String oldName =
-                    old.getString("name");
-
-            String oldUnit =
-                    normalizedUnit(
-                            old.getString("unit")
-                    );
-
-            double quantity =
-                    old.getDouble("quantity");
-
-            Product product = findProduct(id);
-
-            if (product == null) {
-                plan.skipped.add(
-                        oldName +
-                        " — сейчас отсутствует в каталоге."
-                );
+            if (p == null) {
+                result.skipped.add(name + " — сейчас недоступен.");
                 continue;
             }
 
             if (
                     !supportedUnit(oldUnit) ||
-                    !supportedUnit(product.unit) ||
-                    !oldUnit.equals(
-                            normalizedUnit(product.unit)
-                    )
+                    !supportedUnit(p.unit) ||
+                    !oldUnit.equals(unit(p.unit)) ||
+                    (!kg(p) && value % 2 != 0)
             ) {
-                plan.skipped.add(
-                        oldName +
-                        " — единица продажи изменилась " +
-                        "или не поддерживается. " +
-                        "Выберите товар вручную."
+                result.skipped.add(
+                        name + " — изменилась единица продажи " +
+                        "или количество не подходит."
                 );
                 continue;
             }
 
-            int value =
-                    (int) Math.round(quantity * 2);
-
-            if (
-                    !isKilogram(product) &&
-                    value % 2 != 0
-            ) {
-                plan.skipped.add(
-                        oldName +
-                        " — для штук и упаковок " +
-                        "нужно целое количество."
-                );
-                continue;
-            }
-
-            long line =
-                    (long) product.price * 50L * value;
-
-            plan.totalKopecks += line;
-            plan.quantities.put(id, value);
-
-            plan.included.add(
-                    product.name + " — " +
-                    quantityText(product, value) +
+            long line = (long) p.price * 50 * value;
+            result.total += line;
+            result.quantities.put(p.id, value);
+            result.included.add(
+                    p.name + " — " + quantity(p, value) +
                     " — " + money(line)
             );
         }
 
-        if (
-                plan.quantities.size() > 100 ||
-                plan.totalKopecks > 1000000000L ||
-                (
-                        !plan.quantities.isEmpty() &&
-                        plan.totalKopecks <= 0
-                )
-        ) {
-            throw new Exception(
-                    "Недопустимая сумма или состав"
-            );
+        if (result.total > MAX_TOTAL) {
+            throw new Exception("Слишком большая сумма");
         }
-
-        return plan;
+        return result;
     }
 
-    private String joinLines(List<String> values) {
+    private String join(List<String> values) {
         StringBuilder result = new StringBuilder();
-
         for (String value : values) {
-            if (result.length() > 0) {
-                result.append("\n");
-            }
-
+            if (result.length() > 0) result.append("\n");
             result.append("• ").append(value);
         }
-
         return result.toString();
     }
 
-    private void failRepeat(String details) {
-        repeatingOrderId = null;
-
+    private void failRepeat(String reason) {
+        repeatingId = null;
         if (destroyed) return;
-
         redraw();
-
         message(
                 "Повтор заказа",
-                details +
-                "\n\nКорзина не заменена. " +
-                "Новый заказ продавцу не отправлялся."
+                reason + "\n\nКорзина не заменена. Новый заказ не отправлен."
         );
     }
 
-    private void showRepeatConfirmation(
-            String id,
-            JSONObject source,
-            RepeatPlan plan
+    private void confirmRepeat(
+            String id, JSONObject source, RepeatPlan plan
     ) {
         if (destroyed || isFinishing()) {
-            repeatingOrderId = null;
+            repeatingId = null;
             return;
         }
 
-        StringBuilder description =
-                new StringBuilder();
-
-        description.append("Товары из ")
-                .append(orderTitle(source))
-                .append(":\n\n")
-                .append(joinLines(plan.included))
-                .append("\n\nТовары по текущим ценам: ")
-                .append(money(plan.totalKopecks));
-
-        if (!plan.skipped.isEmpty()) {
-            description.append(
-                    "\n\nНЕ БУДУТ ДОБАВЛЕНЫ:\n"
-            ).append(joinLines(plan.skipped));
-        }
-
-        description.append(
-                "\n\nИспользуются текущие цены и акции. " +
-                "Сумма может отличаться от прежнего заказа."
-        );
-
-        if (!cartHalves.isEmpty()) {
-            description.append(
-                    "\n\nВНИМАНИЕ: товары в вашей нынешней корзине " +
-                    "будут заменены указанным составом."
-            );
-        } else {
-            description.append(
-                    "\n\nУказанные товары будут добавлены в корзину."
-            );
-        }
-
-        description.append(
-                "\n\nДанные покупателя, выбранный сейчас город " +
-                "и способ получения сохранятся. Проверьте " +
-                "их в корзине. Город из старого заказа " +
-                "автоматически не переносится." +
-                "\n\nЭто не отправка заказа. " +
-                "Оформление подтверждается отдельно."
-        );
+        String body = "Товары из " + orderTitle(source) + ":\n\n" +
+                join(plan.included) +
+                "\n\nПо текущим ценам: " + money(plan.total) +
+                (plan.skipped.isEmpty()
+                        ? "" : "\n\nНе будут добавлены:\n" + join(plan.skipped)) +
+                (cart.isEmpty()
+                        ? "\n\nТовары будут добавлены в корзину."
+                        : "\n\nВНИМАНИЕ: нынешняя корзина будет заменена.") +
+                "\n\nГород и данные покупателя сохранятся. " +
+                "Дату и время нужно выбрать заново. " +
+                "Это не отправка заказа.";
 
         AlertDialog dialog = dialogBuilder()
                 .setTitle("Повторить заказ?")
-                .setMessage(description.toString())
+                .setMessage(body)
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton(
-                        cartHalves.isEmpty()
-                                ? "Добавить в корзину"
-                                : "Заменить корзину",
+                        cart.isEmpty() ? "Добавить в корзину" : "Заменить корзину",
                         null
                 )
                 .create();
 
         dialog.setOnDismissListener(d -> {
-            if (id.equals(repeatingOrderId)) {
-                repeatingOrderId = null;
-
-                if (!destroyed) {
-                    redraw();
-                }
+            if (id.equals(repeatingId)) {
+                repeatingId = null;
+                if (!destroyed) redraw();
             }
         });
 
         dialog.show();
-        decorateDialog(dialog);
+        decorate(dialog);
 
         dialog.getButton(AlertDialog.BUTTON_POSITIVE)
                 .setOnClickListener(v -> {
                     if (
-                            destroyed ||
-                            !id.equals(repeatingOrderId) ||
-                            sending ||
-                            pendingOrder != null
-                    ) {
-                        dialog.dismiss();
-                        return;
-                    }
+                            destroyed || !id.equals(repeatingId) ||
+                            sending || pending != null || preparing
+                    ) return;
 
                     try {
-                        String serialized =
-                                cartJson(
-                                        plan.quantities
-                                ).toString();
-
-                        if (!prefs.edit()
-                                .putString(
-                                        "cart_v2",
-                                        serialized
-                                )
-                                .commit()) {
-
-                            message(
-                                    "Корзина",
-                                    "Не удалось подтвердить сохранение " +
-                                    "новой корзины. Заказ не отправлен."
-                            );
-                            return;
+                        if (!prefs.edit().putString(
+                                "cart_v2", cartJson(plan.quantities).toString()
+                        ).commit()) {
+                            throw new Exception("Ошибка сохранения");
                         }
 
                         saveProfile();
-
-                        cartHalves.clear();
-                        cartHalves.putAll(
-                                plan.quantities
-                        );
-
+                        cart.clear();
+                        cart.putAll(plan.quantities);
+                        repeatingId = null;
                         consent = false;
                         customerComment = "";
-                        repeatingOrderId = null;
-                        currentTab = 3;
+                        clearSelectedSlot();
+                        tab = 3;
                         showingHistory = false;
-
                         dialog.dismiss();
                         render(false);
-
-                        Toast.makeText(
-                                StoreActivity.this,
-                                "Корзина подготовлена. " +
-                                "Проверьте город, адрес " +
-                                "и подтвердите оформление.",
-                                Toast.LENGTH_LONG
-                        ).show();
 
                     } catch (Exception error) {
                         message(
                                 "Корзина",
-                                "Не удалось подготовить корзину. " +
+                                "Не удалось сохранить корзину. " +
                                 "Заказ не отправлен."
                         );
                     }
@@ -3462,738 +2398,482 @@ public class StoreActivity extends Activity {
 
     // -------------------- КАТАЛОГ С СЕРВЕРА --------------------
 
-    private String stringValue(
-            JSONObject object,
-            String key
-    ) {
-        if (
-                !object.has(key) ||
-                object.isNull(key)
-        ) {
-            return "";
-        }
-
-        return object.optString(key, "").trim();
-    }
-
-    private String productImage(JSONObject item) {
-        String[] keys = {
-                "imageUrl",
-                "image_url",
-                "photoUrl",
-                "photo_url",
-                "image"
-        };
-
-        for (String key : keys) {
-            String value =
-                    stringValue(item, key);
-
-            if (value.startsWith("https://")) {
-                return value;
-            }
-        }
-
-        return "";
-    }
-
-    private int readProductPrice(
-            JSONObject item,
-            String key
-    ) throws Exception {
-        int value = new BigDecimal(
+    private int price(JSONObject item, String key) throws Exception {
+        int result = new BigDecimal(
                 item.get(key).toString()
         ).intValueExact();
 
-        if (value < 1 || value > 1000000) {
-            throw new Exception(
-                    "Некорректная цена"
-            );
+        if (result < 1 || result > 1000000) {
+            throw new Exception("Некорректная цена");
         }
-
-        return value;
+        return result;
     }
 
-    private int readOldPrice(
-            JSONObject item,
-            int currentPrice
-    ) {
-        if (
-                !item.has("oldPriceRub") ||
-                item.isNull("oldPriceRub")
-        ) {
-            return 0;
-        }
+    private List<Product> parseCatalog(JSONObject data) throws Exception {
+        JSONArray array = data.getJSONArray("products");
+        List<Product> result = new ArrayList<>();
+        Set<String> ids = new HashSet<>();
 
-        try {
-            int value =
-                    readProductPrice(
-                            item,
-                            "oldPriceRub"
-                    );
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject item = array.getJSONObject(i);
+            if (!item.optBoolean("available", true)) continue;
 
-            return value > currentPrice
-                    ? value : 0;
+            Product p = new Product();
+            p.id = str(item, "id");
+            p.name = str(item, "name");
+            p.category = str(item, "category");
+            p.description = str(item, "description");
+            p.unit = str(item, "unit");
+            p.imageUrl = "";
 
-        } catch (Exception error) {
-            return 0;
-        }
-    }
-
-    private List<Product> parseCatalog(
-            JSONObject data
-    ) throws Exception {
-        JSONArray array =
-                data.getJSONArray("products");
-
-        List<Product> loaded =
-                new ArrayList<>();
-
-        Set<String> ids =
-                new HashSet<>();
-
-        for (int i = 0;
-             i < array.length();
-             i++) {
-
-            JSONObject item =
-                    array.getJSONObject(i);
-
-            if (!item.optBoolean(
-                    "available",
-                    true
-            )) {
-                continue;
+            for (String key : new String[]{
+                    "imageUrl", "image_url", "photoUrl", "photo_url", "image"
+            }) {
+                String url = str(item, key);
+                if (url.startsWith("https://")) {
+                    p.imageUrl = url;
+                    break;
+                }
             }
 
-            Product product = new Product();
+            p.price = price(item, "priceRub");
+            p.oldPrice = 0;
 
-            product.id =
-                    stringValue(item, "id");
-
-            product.name =
-                    stringValue(item, "name");
-
-            product.category =
-                    stringValue(item, "category");
-
-            product.description =
-                    stringValue(item, "description");
-
-            product.unit =
-                    stringValue(item, "unit");
-
-            product.imageUrl =
-                    productImage(item);
-
-            product.price =
-                    readProductPrice(
-                            item,
-                            "priceRub"
-                    );
-
-            product.oldPrice =
-                    readOldPrice(
-                            item,
-                            product.price
-                    );
-
-            if (product.category.isEmpty()) {
-                product.category = "Каталог";
+            if (item.has("oldPriceRub") && !item.isNull("oldPriceRub")) {
+                try {
+                    int old = price(item, "oldPriceRub");
+                    p.oldPrice = old > p.price ? old : 0;
+                } catch (Exception ignored) {
+                }
             }
 
-            if (product.unit.isEmpty()) {
-                product.unit = "кг";
-            }
+            if (p.category.isEmpty()) p.category = "Каталог";
+            if (p.unit.isEmpty()) p.unit = "кг";
 
             if (
-                    !product.id.matches("[a-z0-9_-]{1,80}") ||
-                    product.name.isEmpty() ||
-                    !ids.add(product.id)
+                    !p.id.matches("[a-z0-9_-]{1,80}") ||
+                    p.name.isEmpty() || !ids.add(p.id)
             ) {
-                throw new Exception(
-                        "Некорректный товар"
-                );
+                throw new Exception("Некорректный товар");
             }
 
-            loaded.add(product);
+            result.add(p);
         }
-
-        return loaded;
+        return result;
     }
 
     private void loadCatalog() {
-        if (
-                loading ||
-                destroyed ||
-                repeating()
-        ) {
+        if (loadingCatalog || destroyed || preparing || repeatingId != null) {
             return;
         }
 
         saveProfile();
-        loading = true;
+        loadingCatalog = true;
         render(true);
 
         api.loadProducts(new ShopApi.Callback() {
             @Override
             public void onSuccess(JSONObject data) {
                 if (destroyed) return;
+                saveProfile();
 
                 try {
-                    List<Product> loaded =
-                            parseCatalog(data);
-
-                    saveProfile();
+                    List<Product> loaded = parseCatalog(data);
                     products.clear();
                     products.addAll(loaded);
-
                     freshCatalog = true;
-                    loading = false;
-
+                    loadingCatalog = false;
                     render(true);
 
                 } catch (Exception error) {
-                    saveProfile();
-
+                    loadingCatalog = false;
                     freshCatalog = false;
-                    loading = false;
-
                     render(true);
-
                     message(
-                            "Ошибка каталога",
-                            "Не удалось прочитать товары. " +
-                            "Попробуйте обновить каталог."
+                            "Каталог",
+                            "Не удалось прочитать товары. Повторите обновление."
                     );
                 }
             }
 
             @Override
-            public void onError(
-                    ShopApi.ApiError error
-            ) {
+            public void onError(ShopApi.ApiError error) {
                 if (destroyed) return;
-
                 saveProfile();
-
+                loadingCatalog = false;
                 freshCatalog = false;
-                loading = false;
-
                 render(true);
-
-                message(
-                        "Каталог",
-                        error.getMessage()
-                );
+                message("Каталог", error.getMessage());
             }
         });
     }
 
     // -------------------- ПОДГОТОВКА ЗАКАЗА --------------------
 
-    private String createOrderAccessToken() {
+    private String createToken() {
         byte[] bytes = new byte[32];
         new SecureRandom().nextBytes(bytes);
-
-        char[] alphabet =
-                "0123456789abcdef".toCharArray();
-
+        char[] alphabet = "0123456789abcdef".toCharArray();
         char[] result = new char[64];
 
         for (int i = 0; i < bytes.length; i++) {
-            int value = bytes[i] & 0xff;
-
-            result[i * 2] =
-                    alphabet[value >>> 4];
-
-            result[i * 2 + 1] =
-                    alphabet[value & 15];
+            int value = bytes[i] & 255;
+            result[i * 2] = alphabet[value >>> 4];
+            result[i * 2 + 1] = alphabet[value & 15];
         }
-
         return new String(result);
     }
 
     private void prepareOrder() {
-        if (
-                sending ||
-                pendingOrder != null ||
-                repeating()
-        ) {
-            return;
-        }
-
+        if (busyCart()) return;
         saveProfile();
 
         if (!historyReadable) {
             message(
-                    "История не прочитана",
-                    "Чтобы не перезаписать сохранённые сведения, " +
-                    "новая отправка остановлена. Не удаляйте " +
-                    "приложение. Свяжитесь с магазином."
+                    "История",
+                    "История не прочитана. Чтобы не потерять записи, " +
+                    "отправка остановлена. Не удаляйте приложение."
             );
             return;
         }
 
-        String phone =
-                customerPhone.replaceAll("[^0-9]", "");
+        String phone = customerPhone.replaceAll("[^0-9]", "");
 
-        if (
-                !freshCatalog ||
-                loading ||
-                cartHalves.isEmpty()
-        ) {
-            message(
-                    "Проверьте заказ",
-                    "Дождитесь обновления каталога " +
-                    "и выберите товары."
-            );
+        if (!freshCatalog || loadingCatalog || cart.isEmpty()) {
+            message("Заказ", "Обновите каталог и выберите товары.");
             return;
         }
-
-        if (cartHalves.size() > 100) {
-            message(
-                    "Слишком много позиций",
-                    "В одном заказе допускается " +
-                    "до 100 разных товаров."
-            );
+        if (cart.size() > 100) {
+            message("Заказ", "Допускается до 100 разных товаров.");
             return;
         }
-
-        if (
-                customerName.length() < 2 ||
-                customerName.length() > 80
-        ) {
-            message(
-                    "Проверьте имя",
-                    "Введите имя от 2 до 80 символов."
-            );
+        if (customerName.length() < 2 || customerName.length() > 80) {
+            message("Имя", "Введите имя от 2 до 80 символов.");
             return;
         }
-
         if (!phone.matches("[78][0-9]{10}")) {
-            message(
-                    "Проверьте телефон",
-                    "Пример: +7 949 123-45-67."
-            );
+            message("Телефон", "Пример: +7 949 123-45-67.");
+            return;
+        }
+        if (delivery && !knownCity(city)) {
+            message("Город", "Выберите город доставки.");
             return;
         }
 
-        if (
-                delivery &&
-                !knownDeliveryCity(deliveryCity)
-        ) {
-            message(
-                    "Выберите город",
-                    "Укажите город доставки. Для других " +
-                    "населённых пунктов выберите «Другой город» " +
-                    "и впишите название в адрес."
-            );
-            return;
-        }
+        String destination = actualCity();
 
         if (
                 delivery &&
                 (
-                        customerAddress.length() < 5 ||
-                        customerAddress.length() > 250
+                        destination.length() < 2 ||
+                        destination.length() > 80 ||
+                        destination.matches(".*[\\p{Cntrl}].*") ||
+                        Arrays.asList("другой город", "другой", "other")
+                                .contains(destination.toLowerCase(Locale.ROOT))
                 )
         ) {
             message(
-                    "Проверьте адрес",
-                    "Введите полный адрес от 5 до 250 символов. " +
-                    "Для другого города укажите его название."
-            );
-            return;
-        }
-
-        if (customerComment.length() > 300) {
-            message(
-                    "Комментарий",
-                    "Допускается не более 300 символов."
-            );
-            return;
-        }
-
-        if (!consent) {
-            message(
-                    "Согласие",
-                    "Подтвердите передачу данных магазину " +
-                    "для обработки заказа."
+                    "Название города",
+                    "Укажите настоящее название вашего города " +
+                    "в отдельном поле."
             );
             return;
         }
 
         if (
-                totalKopecks() <= 0 ||
-                totalKopecks() > 1000000000L
+                delivery &&
+                (customerAddress.length() < 5 || customerAddress.length() > 250)
         ) {
-            message(
-                    "Проверьте сумму",
-                    "Сумма должна быть больше нуля " +
-                    "и не превышать 10 000 000 ₽."
-            );
+            message("Адрес", "Введите полный адрес от 5 до 250 символов.");
+            return;
+        }
+        if (customerComment.length() > 300) {
+            message("Комментарий", "Допускается до 300 символов.");
+            return;
+        }
+        if (!consent) {
+            message("Согласие", "Подтвердите согласие на обработку заказа.");
             return;
         }
 
         try {
             JSONArray items = new JSONArray();
 
-            for (Map.Entry<String, Integer> entry :
-                    cartHalves.entrySet()) {
-
-                Product product =
-                        findProduct(entry.getKey());
-
-                if (product == null) {
-                    message(
-                            "Есть недоступный товар",
-                            "Уберите недоступный товар из корзины."
-                    );
-                    return;
-                }
-
-                int value = entry.getValue();
+            for (String id : new TreeSet<>(cart.keySet())) {
+                Product p = findProduct(id);
+                int q = halves(id);
 
                 if (
-                        value < 1 ||
-                        value > 100 ||
-                        (
-                                !isKilogram(product) &&
-                                value % 2 != 0
-                        )
+                        p == null || !supportedUnit(p.unit) ||
+                        q < 1 || q > 100 || (!kg(p) && q % 2 != 0)
                 ) {
                     message(
-                            "Проверьте количество",
-                            "Исправьте количество товара «" +
-                            product.name +
-                            "». Для штук и упаковок " +
-                            "нужны целые числа."
+                            "Проверьте корзину",
+                            "Один из товаров недоступен либо его " +
+                            "количество не соответствует единице продажи."
                     );
                     return;
                 }
 
                 JSONObject item = new JSONObject();
-
-                item.put(
-                        "productId",
-                        entry.getKey()
-                );
-
-                item.put(
-                        "quantity",
-                        value / 2.0
-                );
-
+                item.put("productId", id);
+                item.put("quantity", q / 2.0);
                 items.put(item);
             }
 
-            JSONObject order = new JSONObject();
-
-            order.put(
-                    "requestId",
-                    UUID.randomUUID().toString()
-            );
-
-            order.put("name", customerName);
-            order.put("phone", phone);
-
-            order.put(
-                    "fulfillment",
-                    delivery ? "delivery" : "pickup"
-            );
-
-            order.put(
-                    "address",
-                    delivery ? customerAddress : ""
-            );
-
-            /*
-             * Для самовывоза город доставки не передаём.
-             * Для старых pending-запросов ничего не добавляем:
-             * они отправляются прежними, как были сохранены.
-             */
-            if (delivery) {
-                order.put(
-                        "deliveryCity",
-                        deliveryCity
-                );
+            long sum = total();
+            if (sum <= 0 || sum > MAX_TOTAL) {
+                throw new Exception("Некорректная сумма");
             }
 
-            order.put(
-                    "comment",
-                    customerComment
-            );
-
+            JSONObject order = new JSONObject();
+            order.put("requestId", UUID.randomUUID().toString());
+            order.put("name", customerName);
+            order.put("phone", phone);
+            order.put("fulfillment", fulfillment());
+            order.put("address", delivery ? customerAddress : "");
+            if (delivery) order.put("deliveryCity", destination);
+            order.put("comment", customerComment);
             order.put("items", items);
+            order.put("orderAccessToken", createToken());
 
-            order.put(
-                    "orderAccessToken",
-                    createOrderAccessToken()
-            );
-
-            confirmNewOrder(order);
+            if (selectedSlotId.isEmpty()) {
+                confirmNewOrder(order, sum, null);
+            } else {
+                Slot chosen = selectedSlotSnapshot;
+                if (chosen == null || !chosen.fulfillment.equals(fulfillment())) {
+                    clearSelectedSlot();
+                    redraw();
+                    message("Время", "Выберите дату и время заново.");
+                    return;
+                }
+                order.put("receivingSlotId", chosen.id);
+                verifySlotBeforeConfirm(order, sum, chosen);
+            }
 
         } catch (Exception error) {
-            message(
-                    "Ошибка",
-                    "Не удалось подготовить заказ."
-            );
+            message("Заказ", "Не удалось подготовить заказ.");
         }
     }
 
-    private void confirmNewOrder(JSONObject order) {
-        boolean orderDelivery = "delivery".equals(
-                order.optString("fulfillment")
-        );
+    private void verifySlotBeforeConfirm(
+            JSONObject order, long sum, Slot chosen
+    ) {
+        preparing = true;
+        redraw();
 
-        String shippingNote = orderDelivery
-                ? deliveryHint(
-                        order.optString("deliveryCity"),
-                        totalKopecks(),
-                        freshCatalog && !loading
-                )
+        api.loadReceivingSlots(new ShopApi.Callback() {
+            @Override
+            public void onSuccess(JSONObject data) {
+                if (destroyed) return;
+                saveProfile();
+                preparing = false;
+
+                try {
+                    List<Slot> loaded = parseSlots(data);
+                    Slot latest = null;
+
+                    for (Slot slot : loaded) {
+                        if (slot.id.equals(chosen.id)) latest = slot;
+                    }
+
+                    replaceSlots(loaded);
+                    render(true);
+
+                    if (!chosen.same(latest)) {
+                        clearSelectedSlot();
+                        render(true);
+                        message(
+                                "Расписание изменилось",
+                                "Выбранный интервал закрыт или изменён. " +
+                                "Выберите время заново. Заказ не отправлен."
+                        );
+                        return;
+                    }
+
+                    confirmNewOrder(order, sum, latest);
+
+                } catch (Exception error) {
+                    slotsLoaded = false;
+                    render(true);
+                    message(
+                            "Расписание",
+                            "Не удалось проверить интервал. " +
+                            "Заказ не отправлен. Обновите расписание."
+                    );
+                }
+            }
+
+            @Override
+            public void onError(ShopApi.ApiError error) {
+                if (destroyed) return;
+                saveProfile();
+                preparing = false;
+                render(true);
+                message(
+                        "Расписание",
+                        error.getMessage() + "\n\nЗаказ не отправлен."
+                );
+            }
+        });
+    }
+
+    private void confirmNewOrder(JSONObject order, long sum, Slot chosen) {
+        if (destroyed || isFinishing()) return;
+
+        /*
+         * Пока открыт диалог, блокируем изменение корзины.
+         * Неподтверждённый запрос сохраняем только по кнопке.
+         */
+        preparing = true;
+        redraw();
+
+        String time = chosen == null
+                ? "Дата и время: по согласованию с магазином."
+                : "Дата и время: " + chosen.label() +
+                  "\nМосковское время, UTC+3.";
+
+        String shipping = "delivery".equals(order.optString("fulfillment"))
+                ? deliveryHint(order.optString("deliveryCity"), sum)
                 : "Самовывоз из магазина.";
 
         AlertDialog dialog = dialogBuilder()
                 .setTitle("Подтвердите заказ")
                 .setMessage(
-                        "Товары: " +
-                        money(totalKopecks()) +
-                        "\n\n" +
-                        receivingDescription(order) +
-                        "\n\n" +
-                        shippingNote +
-                        "\n\nОплата при получении.\n" +
-                        "Сервер проверит актуальные цены " +
-                        "и условия доставки. Платная доставка " +
-                        "в сумму товаров не включена: " +
-                        "её стоимость согласует магазин."
+                        "Товары: " + money(sum) +
+                        "\n\n" + receivingDescription(order) +
+                        "\n\n" + time +
+                        "\n\n" + shipping +
+                        "\n\nОплата при получении. " +
+                        "Сервер проверит актуальные цены и интервал. " +
+                        "Доставку и время подтверждает магазин. " +
+                        "Платная доставка в сумму товаров не включена."
                 )
                 .setNegativeButton("Назад", null)
-                .setPositiveButton(
-                        "Отправить",
-                        (d, which) -> {
-                            if (
-                                    sending ||
-                                    pendingOrder != null ||
-                                    repeating()
-                            ) {
-                                return;
-                            }
-
-                            String payload =
-                                    order.toString();
-
-                            if (!prefs.edit()
-                                    .putString(
-                                            "pending_order",
-                                            payload
-                                    )
-                                    .commit()) {
-
-                                message(
-                                        "Ошибка",
-                                        "Не удалось сохранить заказ " +
-                                        "на телефоне. " +
-                                        "Отправка не выполнена."
-                                );
-                                return;
-                            }
-
-                            pendingOrder = payload;
-                            sendPending();
-                        }
-                )
+                .setPositiveButton("Отправить", null)
                 .create();
 
+        dialog.setOnDismissListener(d -> {
+            preparing = false;
+            if (!destroyed) redraw();
+        });
+
         dialog.show();
-        decorateDialog(dialog);
+        decorate(dialog);
+
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    if (sending || pending != null || repeatingId != null) {
+                        return;
+                    }
+
+                    String payload = order.toString();
+                    if (!prefs.edit().putString(
+                            "pending_order", payload
+                    ).commit()) {
+                        message(
+                                "Заказ",
+                                "Не удалось сохранить запрос на телефоне. " +
+                                "Отправка не выполнена."
+                        );
+                        return;
+                    }
+
+                    pending = payload;
+                    dialog.dismiss();
+                    sendPending();
+                });
     }
 
+    // -------------------- ПОДТВЕРЖДЁННЫЕ И ПРЕЖНИЕ ЗАПРОСЫ --------------------
+
     private void confirmPending() {
-        if (
-                sending ||
-                pendingOrder == null ||
-                repeating()
-        ) {
+        if (sending || preparing || pending == null || repeatingId != null) {
             return;
         }
 
         try {
-            JSONObject order =
-                    new JSONObject(pendingOrder);
+            JSONObject order = new JSONObject(pending);
 
             AlertDialog dialog = dialogBuilder()
                     .setTitle("Проверить прежний заказ?")
                     .setMessage(
-                            order.optString("name") +
-                            "\n" +
+                            order.optString("name") + "\n" +
                             order.optString("phone") +
-                            "\n\n" +
-                            receivingDescription(order) +
-                            "\n\nБудет использован прежний " +
-                            "идентификатор и прежнее содержимое. " +
-                            "Если заказ уже сохранён, второй " +
-                            "с этим идентификатором не создастся."
+                            "\n\n" + receivingDescription(order) +
+                            "\n\nИспользуются прежний идентификатор " +
+                            "и прежнее содержимое, включая выбранный " +
+                            "ранее интервал. Уже сохранённый заказ " +
+                            "не создаётся повторно."
                     )
                     .setNegativeButton("Назад", null)
                     .setPositiveButton(
-                            "Проверить",
-                            (d, which) -> sendPending()
+                            "Проверить", (d, which) -> sendPending()
                     )
                     .create();
-
             dialog.show();
-            decorateDialog(dialog);
+            decorate(dialog);
 
         } catch (Exception error) {
             message(
-                    "Не удалось прочитать заказ",
-                    "Свяжитесь с магазином перед повторным " +
-                    "оформлением. Не удаляйте приложение."
+                    "Прежний заказ",
+                    "Не удалось прочитать запрос. Свяжитесь с магазином. " +
+                    "Не удаляйте приложение."
             );
         }
     }
 
-    // -------------------- ПЕРВАЯ ЗАПИСЬ ИСТОРИИ --------------------
-
-    private JSONObject initialHistoryEntry(
-            JSONObject submitted,
-            JSONObject response,
-            long confirmedKopecks
+    private JSONObject initialEntry(
+            JSONObject submitted, JSONObject response, long confirmed
     ) throws Exception {
         String id = response.getString("id");
-
         JSONObject previous = historyOrder(id);
-
-        if (previous != null) {
-            return new JSONObject(previous.toString());
-        }
+        if (previous != null) return new JSONObject(previous.toString());
 
         JSONObject entry = new JSONObject();
-
-        String token = submitted.optString(
-                "orderAccessToken",
-                ""
-        );
-
-        boolean trackable =
-                token.matches("[0-9a-f]{64}") &&
-                response.optBoolean(
-                        "orderTrackingAvailable",
-                        false
-                );
+        String token = submitted.optString("orderAccessToken", "");
+        boolean trackable = token.matches("[0-9a-f]{64}") &&
+                response.optBoolean("orderTrackingAvailable", false);
 
         entry.put("id", id);
-
+        entry.put("orderNumber", response.optLong("orderNumber", 0));
         entry.put(
-                "orderNumber",
-                response.optLong("orderNumber", 0)
+                "totalRub", BigDecimal.valueOf(confirmed, 2).toPlainString()
         );
 
-        entry.put(
-                "totalRub",
-                BigDecimal.valueOf(
-                        confirmedKopecks,
-                        2
-                ).toPlainString()
-        );
-
-        String status = response.optString(
-                "status",
-                "new"
-        );
-
-        entry.put(
-                "status",
-                knownStatus(status) ? status : "new"
-        );
-
-        entry.put(
-                "createdAt",
-                Instant.now().toString()
-        );
-
-        entry.put(
-                "checkedAt",
-                System.currentTimeMillis()
-        );
-
-        entry.put(
-                "fulfillment",
-                submitted.optString("fulfillment")
-        );
-
-        entry.put(
-                "deliveryCity",
-                stringValue(submitted, "deliveryCity")
-        );
-
-        entry.put(
-                "address",
-                stringValue(submitted, "address")
-        );
-
-        entry.put(
-                "trackingAvailable",
-                trackable
-        );
-
+        String status = response.optString("status", "new");
+        entry.put("status", knownStatus(status) ? status : "new");
+        entry.put("createdAt", Instant.now().toString());
+        entry.put("checkedAt", System.currentTimeMillis());
+        entry.put("fulfillment", submitted.optString("fulfillment"));
+        entry.put("deliveryCity", str(submitted, "deliveryCity"));
+        entry.put("address", str(submitted, "address"));
+        entry.put("trackingAvailable", trackable);
         entry.put("serverSnapshot", false);
 
-        if (trackable) {
+        if (trackable) entry.put("orderAccessToken", token);
+
+        if (response.optJSONObject("deliveryInfo") != null) {
             entry.put(
-                    "orderAccessToken",
-                    token
+                    "deliveryInfo", response.getJSONObject("deliveryInfo")
             );
         }
 
+        copyReceivingSlot(entry, response);
+
         JSONArray summary = new JSONArray();
+        JSONArray requested = submitted.getJSONArray("items");
 
-        JSONArray requested =
-                submitted.getJSONArray("items");
+        for (int i = 0; i < requested.length(); i++) {
+            JSONObject item = requested.getJSONObject(i);
+            String productId = item.getString("productId");
+            Product p = findProduct(productId);
 
-        for (int i = 0;
-             i < requested.length();
-             i++) {
-
-            JSONObject item =
-                    requested.getJSONObject(i);
-
-            String productId =
-                    item.getString("productId");
-
-            Product product =
-                    findProduct(productId);
-
-            JSONObject saved =
-                    new JSONObject();
-
-            saved.put(
-                    "productId",
-                    productId
-            );
-
-            saved.put(
-                    "quantity",
-                    item.get("quantity")
-            );
-
-            saved.put(
-                    "name",
-                    product == null
-                            ? "Товар " + productId
-                            : product.name
-            );
-
-            saved.put(
-                    "unit",
-                    product == null
-                            ? ""
-                            : product.unit
-            );
-
+            JSONObject saved = new JSONObject();
+            saved.put("productId", productId);
+            saved.put("quantity", item.get("quantity"));
+            saved.put("name", p == null ? "Товар " + productId : p.name);
+            saved.put("unit", p == null ? "" : p.unit);
             summary.put(saved);
         }
 
@@ -4201,27 +2881,17 @@ public class StoreActivity extends Activity {
         return entry;
     }
 
-    // -------------------- ОТПРАВКА --------------------
-
     private void sendPending() {
         if (
-                sending ||
-                pendingOrder == null ||
-                repeating()
-        ) {
-            return;
-        }
+                destroyed || sending || preparing ||
+                pending == null || repeatingId != null
+        ) return;
 
         final JSONObject order;
-
         try {
-            order = new JSONObject(pendingOrder);
-
+            order = new JSONObject(pending);
         } catch (Exception error) {
-            message(
-                    "Ошибка",
-                    "Не удалось прочитать сохранённый заказ."
-            );
+            message("Заказ", "Не удалось прочитать сохранённый запрос.");
             return;
         }
 
@@ -4230,94 +2900,49 @@ public class StoreActivity extends Activity {
         render(true);
 
         /*
-         * Отправляем сохранённый JSON без добавления города
-         * из текущего профиля и без нового requestId.
+         * Никаких новых полей в старый запрос не добавляем.
+         * requestId, ключ и receivingSlotId остаются прежними.
          */
         api.sendOrder(order, new ShopApi.Callback() {
             @Override
             public void onSuccess(JSONObject data) {
                 if (destroyed) return;
 
-                String id = data.optString("id", "");
-                final long confirmedKopecks;
+                final long confirmed;
+                final JSONArray next;
+                final String receipt;
 
                 try {
-                    if (!id.matches(ORDER_ID_PATTERN)) {
-                        throw new Exception(
-                                "Некорректный идентификатор"
-                        );
+                    String id = data.getString("id");
+                    if (!id.matches(ORDER_PATTERN)) {
+                        throw new Exception("Некорректный ID");
                     }
 
-                    confirmedKopecks =
-                            responseKopecks(data);
+                    confirmed = responseKopecks(data);
+                    JSONObject entry = initialEntry(order, data, confirmed);
+                    next = historyWith(entry, true);
+
+                    receipt = orderTitle(entry) +
+                            "\nТовары: " + money(confirmed) +
+                            "\n" + slotText(entry);
 
                 } catch (Exception error) {
                     sending = false;
                     redraw();
-
                     message(
-                            "Нет подтверждения",
-                            "Ответ сервера неполный или содержит " +
-                            "неверную сумму. Заказ сохранён " +
-                            "на телефоне. Используйте проверку " +
-                            "прежнего заказа."
-                    );
-                    return;
-                }
-
-                long number = data.optLong(
-                        "orderNumber",
-                        0
-                );
-
-                String receipt =
-                        (
-                                number > 0
-                                        ? "Заказ № " + number
-                                        : "Заказ сохранён. " +
-                                          "Номер уточняется."
-                        ) +
-                        "\nТовары: " +
-                        money(confirmedKopecks);
-
-                final JSONArray nextHistory;
-
-                try {
-                    nextHistory = historyWith(
-                            initialHistoryEntry(
-                                    order,
-                                    data,
-                                    confirmedKopecks
-                            ),
-                            true
-                    );
-
-                } catch (Exception error) {
-                    sending = false;
-                    redraw();
-
-                    message(
-                            "Заказ сохранён магазином",
-                            receipt +
-                            "\n\nНе удалось подготовить " +
-                            "локальную историю. Неподтверждённая " +
-                            "запись оставлена на телефоне. " +
-                            "Не оформляйте заказ заново " +
-                            "и не удаляйте приложение."
+                            "Результат пока не подтверждён",
+                            "Не удалось прочитать ответ или подготовить " +
+                            "историю. Сохранённый запрос оставлен. " +
+                            "Используйте проверку прежнего заказа, " +
+                            "не оформляйте новый."
                     );
                     return;
                 }
 
                 boolean saved = prefs.edit()
-                        .putString(
-                                HISTORY_KEY,
-                                nextHistory.toString()
-                        )
+                        .putString(HISTORY_KEY, next.toString())
                         .remove("pending_order")
-                        .putString(
-                                "last_order_v2",
-                                receipt
-                        )
+                        .putString("last_order_v2", receipt)
                         .putString("cart_v2", "{}")
                         .commit();
 
@@ -4325,49 +2950,38 @@ public class StoreActivity extends Activity {
 
                 if (!saved) {
                     redraw();
-
                     message(
                             "Заказ сохранён магазином",
-                            receipt +
-                            "\n\nНе удалось обновить данные " +
-                            "телефона. Сохраните номер. " +
-                            "Не оформляйте заказ заново."
+                            receipt + "\n\nНе удалось обновить данные " +
+                            "телефона. Не оформляйте заказ заново."
                     );
                     return;
                 }
 
                 saveProfile();
-
-                orderHistory = nextHistory;
-                pendingOrder = null;
-
-                cartHalves.clear();
-
+                history = next;
+                pending = null;
+                cart.clear();
                 consent = false;
                 customerComment = "";
-
-                currentTab = 4;
+                clearSelectedSlot();
+                tab = 4;
                 showingHistory = true;
-
                 render(false);
 
                 message(
                         "Спасибо за заказ!",
                         receipt +
-                        "\n\nЗаказ сохранён магазином. " +
-                        "Ожидайте подтверждения продавца. " +
-                        "Оплата при получении.\n\n" +
-                        "Для актуального состава и статуса " +
-                        "нажмите «Обновить статус» в истории."
+                        "\n\nЗаказ сохранён в магазине. Ожидайте " +
+                        "подтверждения продавца. Оплата при получении. " +
+                        "Для актуального состава нажмите " +
+                        "«Обновить статус»."
                 );
             }
 
             @Override
-            public void onError(
-                    ShopApi.ApiError error
-            ) {
+            public void onError(ShopApi.ApiError error) {
                 if (destroyed) return;
-
                 saveProfile();
                 sending = false;
 
@@ -4375,55 +2989,50 @@ public class StoreActivity extends Activity {
                         error.shouldClearPendingOrder() &&
                         error.statusCode != 409
                 ) {
-                    if (prefs.edit()
-                            .remove("pending_order")
-                            .commit()) {
-                        pendingOrder = null;
+                    if (prefs.edit().remove("pending_order").commit()) {
+                        pending = null;
                     }
+                }
+
+                if (error.statusCode == 400 && pending == null) {
+                    /*
+                     * Сервер мог отклонить закрытый интервал.
+                     * Не подставляем другой автоматически.
+                     */
+                    clearSelectedSlot();
+                    slotsLoaded = false;
+                    scheduleError =
+                            "Обновите расписание перед новым выбором времени.";
                 }
 
                 render(true);
 
                 String advice;
-
                 if (error.statusCode == 409) {
-                    advice =
-                            "\n\nКонфликт идентификатора " +
-                            "или ключа заказа. Свяжитесь " +
-                            "с магазином. Не оформляйте " +
-                            "этот заказ заново.";
-
-                } else if (pendingOrder != null) {
-                    advice =
-                            "\n\nЗаказ сохранён на телефоне. " +
-                            "Используйте «Проверить прежний заказ», " +
-                            "а не создавайте новый.";
-
+                    advice = "\n\nКонфликт идентификатора или ключа. " +
+                            "Свяжитесь с магазином. " +
+                            "Не оформляйте этот заказ заново.";
+                } else if (pending != null) {
+                    advice = "\n\nЗапрос сохранён на телефоне. " +
+                            "Используйте «Проверить прежний заказ».";
                 } else {
-                    advice =
-                            "\n\nПроверьте данные и актуальность " +
-                            "каталога перед повторной отправкой.";
+                    advice = "\n\nПроверьте данные, обновите каталог " +
+                            "и расписание перед новой попыткой.";
                 }
 
-                message(
-                        "Результат отправки",
-                        error.getMessage() + advice
-                );
+                message("Результат отправки", error.getMessage() + advice);
             }
         });
     }
 
+    // -------------------- ЖИЗНЕННЫЙ ЦИКЛ --------------------
+
     @Override
     public void onBackPressed() {
-        if (
-                currentTab == 4 &&
-                showingHistory
-        ) {
+        if (tab == 4 && showingHistory) {
             openTab(4);
-
-        } else if (currentTab != 0) {
+        } else if (tab != 0) {
             openTab(0);
-
         } else {
             super.onBackPressed();
         }
@@ -4438,11 +3047,7 @@ public class StoreActivity extends Activity {
     @Override
     protected void onDestroy() {
         destroyed = true;
-
-        if (api != null) {
-            api.close();
-        }
-
+        if (api != null) api.close();
         super.onDestroy();
     }
 }
