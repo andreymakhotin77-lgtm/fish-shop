@@ -8,6 +8,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.text.InputFilter;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -21,31 +22,40 @@ import java.util.*;
 
 public class StoreActivity extends Activity {
 
-    private final int BLACK = Color.rgb(18, 18, 18);
-    private final int CARD = Color.rgb(32, 32, 32);
+    private final int BLACK = Color.rgb(15, 15, 16);
+    private final int CARD = Color.rgb(29, 29, 31);
     private final int GOLD = Color.rgb(212, 175, 55);
-    private final int WHITE = Color.rgb(245, 240, 230);
-    private final int MUTED = Color.rgb(183, 178, 166);
+    private final int WHITE = Color.rgb(248, 244, 233);
+    private final int MUTED = Color.rgb(173, 170, 160);
+    private final int LINE = Color.rgb(59, 54, 38);
+
+    private static final String PICKUP =
+            "г. Макеевка, ул. Плеханова, 1в\n" +
+            "Магазин «Лавка Вкуса»";
+
+    private static final String DELIVERY =
+            "Бесплатная доставка от 2 000 ₽ по Макеевке, " +
+            "Донецку и Харцызску. Другие города и заказы " +
+            "до 2 000 ₽ — по согласованию.";
 
     private final String[] tabs = {
-            "Главная",
-            "Каталог",
-            "Избранное",
-            "Корзина",
-            "Профиль"
+            "Главная", "Каталог", "Избранное", "Корзина", "Профиль"
+    };
+
+    private final String[] tabIcons = {
+            "⌂", "☰", "♡", "▣", "◉"
     };
 
     private final List<Product> products = new ArrayList<>();
     private final Map<String, Integer> cart = new HashMap<>();
-
     private Set<String> favorites = new HashSet<>();
 
     private ShopApi api;
     private SharedPreferences prefs;
 
-    private LinearLayout root;
     private LinearLayout content;
     private LinearLayout navigation;
+    private ScrollView scroll;
 
     private EditText nameInput;
     private EditText phoneInput;
@@ -76,6 +86,7 @@ public class StoreActivity extends Activity {
         String category;
         String description;
         String unit;
+        String imageUrl;
         int price;
     }
 
@@ -85,6 +96,7 @@ public class StoreActivity extends Activity {
 
         getWindow().setStatusBarColor(BLACK);
         getWindow().setNavigationBarColor(BLACK);
+        getWindow().getDecorView().setSystemUiVisibility(0);
 
         getWindow().setSoftInputMode(
                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
@@ -93,6 +105,44 @@ public class StoreActivity extends Activity {
         prefs = getPreferences(MODE_PRIVATE);
         api = new ShopApi();
 
+        restoreData();
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BLACK);
+
+        scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
+
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16), dp(18), dp(16), dp(24));
+
+        scroll.addView(content);
+
+        root.addView(
+                scroll,
+                new LinearLayout.LayoutParams(-1, 0, 1)
+        );
+
+        navigation = new LinearLayout(this);
+        navigation.setOrientation(LinearLayout.HORIZONTAL);
+        navigation.setBackgroundColor(CARD);
+        navigation.setPadding(dp(3), dp(6), dp(3), dp(6));
+
+        root.addView(
+                navigation,
+                new LinearLayout.LayoutParams(-1, -2)
+        );
+
+        setContentView(root);
+
+        render(false);
+        loadCatalog();
+    }
+
+    private void restoreData() {
         customerName = prefs.getString("customer_name", "");
         customerPhone = prefs.getString("customer_phone", "");
         customerAddress = prefs.getString("customer_address", "");
@@ -102,7 +152,7 @@ public class StoreActivity extends Activity {
         favorites = new HashSet<>(
                 prefs.getStringSet(
                         "favorites_v2",
-                        new HashSet<>()
+                        new HashSet<String>()
                 )
         );
 
@@ -115,55 +165,14 @@ public class StoreActivity extends Activity {
 
             while (keys.hasNext()) {
                 String id = keys.next();
-                int quantity = saved.optInt(id, 0);
+                int value = saved.optInt(id, 0);
 
-                if (quantity > 0 && quantity <= 50) {
-                    cart.put(id, quantity);
+                if (value > 0 && value <= 50) {
+                    cart.put(id, value);
                 }
             }
         } catch (Exception ignored) {
         }
-
-        root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BLACK);
-
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-
-        content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-
-        content.setPadding(
-                dp(16),
-                dp(18),
-                dp(16),
-                dp(24)
-        );
-
-        scroll.addView(content);
-
-        root.addView(
-                scroll,
-                new LinearLayout.LayoutParams(-1, 0, 1)
-        );
-
-        navigation = new LinearLayout(this);
-
-        navigation.setPadding(
-                dp(3),
-                dp(7),
-                dp(3),
-                dp(7)
-        );
-
-        navigation.setBackgroundColor(CARD);
-        root.addView(navigation);
-
-        setContentView(root);
-
-        render();
-        loadCatalog();
     }
 
     private int dp(int value) {
@@ -172,14 +181,18 @@ public class StoreActivity extends Activity {
         );
     }
 
-    private GradientDrawable background(
-            int color,
-            boolean border
-    ) {
-        GradientDrawable drawable = new GradientDrawable();
+    private String money(long value) {
+        return String.format(
+                new Locale("ru", "RU"),
+                "%,d",
+                value
+        ) + " ₽";
+    }
 
+    private GradientDrawable background(int color, boolean border) {
+        GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
-        drawable.setCornerRadius(dp(16));
+        drawable.setCornerRadius(dp(18));
 
         if (border) {
             drawable.setStroke(dp(1), GOLD);
@@ -188,86 +201,81 @@ public class StoreActivity extends Activity {
         return drawable;
     }
 
-    private TextView text(
-            String value,
-            int size,
-            int color
-    ) {
+    private TextView text(String value, int size, int color) {
         TextView view = new TextView(this);
-
         view.setText(value);
         view.setTextSize(size);
         view.setTextColor(color);
-
-        view.setPadding(
-                0,
-                dp(5),
-                0,
-                dp(5)
-        );
-
+        view.setPadding(0, dp(4), 0, dp(4));
+        view.setLineSpacing(dp(2), 1);
         return view;
     }
 
-    private Button button(
-            String title,
-            Runnable action
-    ) {
-        Button button = new Button(this);
+    private TextView bold(String value, int size, int color) {
+        TextView view = text(value, size, color);
+        view.setTypeface(null, Typeface.BOLD);
+        return view;
+    }
 
-        button.setText(title);
-        button.setAllCaps(false);
-        button.setTextColor(BLACK);
-        button.setTextSize(14);
+    private Button button(String title, Runnable action) {
+        Button view = new Button(this);
+        view.setText(title);
+        view.setAllCaps(false);
+        view.setTextSize(14);
+        view.setTextColor(BLACK);
+        view.setMinHeight(dp(48));
+        view.setMinimumHeight(dp(48));
 
-        button.setBackgroundTintList(
+        view.setBackgroundTintList(
                 ColorStateList.valueOf(GOLD)
         );
 
-        button.setOnClickListener(v -> action.run());
+        view.setOnClickListener(v -> action.run());
+        return view;
+    }
 
-        return button;
+    private Button secondary(String title, Runnable action) {
+        Button view = button(title, action);
+        view.setTextColor(GOLD);
+        view.setBackgroundTintList(
+                ColorStateList.valueOf(LINE)
+        );
+        return view;
+    }
+
+    private LinearLayout box(boolean border) {
+        LinearLayout view = new LinearLayout(this);
+        view.setOrientation(LinearLayout.VERTICAL);
+        view.setPadding(dp(14), dp(14), dp(14), dp(14));
+        view.setBackground(background(CARD, border));
+        return view;
     }
 
     private LinearLayout panel() {
-        LinearLayout panel = new LinearLayout(this);
-
-        panel.setOrientation(LinearLayout.VERTICAL);
-
-        panel.setPadding(
-                dp(15),
-                dp(12),
-                dp(15),
-                dp(12)
-        );
-
-        panel.setBackground(
-                background(CARD, false)
-        );
+        LinearLayout view = box(false);
 
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(-1, -2);
 
-        params.setMargins(
-                0,
-                dp(8),
-                0,
-                dp(8)
-        );
+        params.setMargins(0, dp(8), 0, dp(8));
+        content.addView(view, params);
+        return view;
+    }
 
-        content.addView(panel, params);
-
-        return panel;
+    private void section(String value) {
+        TextView title = bold(value, 22, WHITE);
+        title.setPadding(0, dp(18), 0, dp(8));
+        content.addView(title);
     }
 
     private EditText input(
             LinearLayout parent,
             String hint,
             String value,
-            int type
+            int type,
+            int maxLength
     ) {
         EditText field = new EditText(this);
-
         field.setText(value);
         field.setHint(hint);
         field.setInputType(type);
@@ -275,84 +283,86 @@ public class StoreActivity extends Activity {
         field.setHintTextColor(MUTED);
         field.setTextSize(16);
 
+        field.setFilters(new InputFilter[]{
+                new InputFilter.LengthFilter(maxLength)
+        });
+
         field.setBackgroundTintList(
                 ColorStateList.valueOf(GOLD)
         );
 
-        field.setPadding(
-                dp(4),
-                dp(12),
-                dp(4),
-                dp(12)
-        );
+        field.setPadding(dp(4), dp(12), dp(4), dp(12));
 
-        parent.addView(field);
+        parent.addView(
+                field,
+                new LinearLayout.LayoutParams(-1, -2)
+        );
 
         return field;
     }
 
-    private void message(
-            String title,
-            String value
-    ) {
-        if (destroyed) return;
+    private AlertDialog.Builder dialogBuilder() {
+        return new AlertDialog.Builder(
+                this,
+                android.R.style.Theme_Material_Dialog_Alert
+        );
+    }
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+    private void decorateDialog(AlertDialog dialog) {
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(
+                    background(CARD, true)
+            );
+        }
+
+        TextView body = dialog.findViewById(android.R.id.message);
+
+        if (body != null) {
+            body.setTextColor(WHITE);
+        }
+
+        int[] buttons = {
+                AlertDialog.BUTTON_POSITIVE,
+                AlertDialog.BUTTON_NEGATIVE,
+                AlertDialog.BUTTON_NEUTRAL
+        };
+
+        for (int which : buttons) {
+            Button view = dialog.getButton(which);
+            if (view != null) view.setTextColor(GOLD);
+        }
+    }
+
+    private void message(String title, String value) {
+        if (destroyed || isFinishing()) return;
+
+        AlertDialog dialog = dialogBuilder()
                 .setTitle(title)
                 .setMessage(value)
                 .setPositiveButton("Понятно", null)
                 .create();
 
-        dialog.setOnShowListener(v -> {
-            if (dialog.getWindow() != null) {
-                dialog.getWindow().setBackgroundDrawable(
-                        background(CARD, true)
-                );
-            }
-
-            dialog.getButton(
-                    AlertDialog.BUTTON_POSITIVE
-            ).setTextColor(GOLD);
-
-            TextView body = dialog.findViewById(
-                    android.R.id.message
-            );
-
-            if (body != null) {
-                body.setTextColor(WHITE);
-            }
-        });
-
         dialog.show();
+        decorateDialog(dialog);
     }
 
     private void saveProfile() {
+        if (prefs == null) return;
+
         if (nameInput != null) {
-            customerName = nameInput
-                    .getText()
-                    .toString()
-                    .trim();
+            customerName = nameInput.getText().toString().trim();
         }
 
         if (phoneInput != null) {
-            customerPhone = phoneInput
-                    .getText()
-                    .toString()
-                    .trim();
+            customerPhone = phoneInput.getText().toString().trim();
         }
 
         if (addressInput != null) {
-            customerAddress = addressInput
-                    .getText()
-                    .toString()
-                    .trim();
+            customerAddress = addressInput.getText().toString().trim();
         }
 
         if (commentInput != null) {
-            customerComment = commentInput
-                    .getText()
-                    .toString()
-                    .trim();
+            customerComment = commentInput.getText().toString().trim();
         }
 
         prefs.edit()
@@ -364,31 +374,35 @@ public class StoreActivity extends Activity {
     }
 
     private void saveCart() {
-        JSONObject data = new JSONObject();
+        JSONObject saved = new JSONObject();
 
         try {
-            for (Map.Entry<String, Integer> item : cart.entrySet()) {
-                data.put(
-                        item.getKey(),
-                        item.getValue()
-                );
+            for (Map.Entry<String, Integer> entry : cart.entrySet()) {
+                saved.put(entry.getKey(), entry.getValue());
             }
         } catch (Exception ignored) {
         }
 
         prefs.edit()
-                .putString("cart_v2", data.toString())
+                .putString("cart_v2", saved.toString())
                 .apply();
     }
 
     private void openTab(int tab) {
         saveProfile();
         currentTab = tab;
-        render();
+        render(false);
     }
 
-    private void render() {
+    private void redraw() {
+        saveProfile();
+        render(true);
+    }
+
+    private void render(boolean keepPosition) {
         if (destroyed) return;
+
+        final int oldY = keepPosition ? scroll.getScrollY() : 0;
 
         nameInput = null;
         phoneInput = null;
@@ -398,134 +412,228 @@ public class StoreActivity extends Activity {
         content.removeAllViews();
         navigation.removeAllViews();
 
-        TextView title = text(
-                "ЛВ  ·  Лавка Вкуса",
-                25,
-                GOLD
-        );
-
-        title.setTypeface(
-                null,
-                Typeface.BOLD
-        );
-
-        content.addView(title);
-
-        content.addView(text(
-                "Рыба · Морепродукты · Живые раки",
-                14,
-                MUTED
-        ));
-
-        for (int i = 0; i < tabs.length; i++) {
-            final int tab = i;
-
-            Button item = button(
-                    tabs[i],
-                    () -> openTab(tab)
-            );
-
-            item.setTextSize(10);
-            item.setPadding(0, 0, 0, 0);
-            item.setMinWidth(0);
-            item.setMinimumWidth(0);
-
-            item.setTextColor(
-                    i == currentTab ? BLACK : GOLD
-            );
-
-            item.setBackgroundTintList(
-                    ColorStateList.valueOf(
-                            i == currentTab ? GOLD : CARD
-                    )
-            );
-
-            navigation.addView(
-                    item,
-                    new LinearLayout.LayoutParams(
-                            0,
-                            dp(54),
-                            1
-                    )
-            );
-        }
+        drawHeader();
+        drawNavigation();
 
         if (loading) {
             content.addView(text(
-                    "Обновляем каталог… После простоя серверу " +
-                    "может потребоваться около минуты.",
-                    14,
+                    "Обновляем каталог… Первый запуск после " +
+                    "простоя сервера может занять около минуты.",
+                    13,
                     MUTED
             ));
         } else if (!freshCatalog) {
-            content.addView(text(
-                    "Каталог пока не загружен. Для оформления " +
-                    "заказа нужен интернет.",
+            LinearLayout notice = panel();
+
+            notice.addView(text(
+                    "Каталог не обновлён. Для заказа нужен " +
+                    "интернет и актуальные цены.",
                     14,
                     MUTED
             ));
 
-            content.addView(button(
+            notice.addView(button(
                     "Загрузить каталог",
                     this::loadCatalog
             ));
         }
 
-        if (currentTab == 0) showHome();
-        if (currentTab == 1) showCatalog(false);
-        if (currentTab == 2) showCatalog(true);
-        if (currentTab == 3) showCart();
-        if (currentTab == 4) showProfile();
+        switch (currentTab) {
+            case 0:
+                showHome();
+                break;
+            case 1:
+                showCatalog(false);
+                break;
+            case 2:
+                showCatalog(true);
+                break;
+            case 3:
+                showCart();
+                break;
+            default:
+                showProfile();
+                break;
+        }
+
+        scroll.post(() -> {
+            if (!destroyed) {
+                scroll.scrollTo(0, oldY);
+            }
+        });
+    }
+
+    private void drawHeader() {
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView logo = bold("ЛВ", 24, GOLD);
+        logo.setGravity(Gravity.CENTER);
+        logo.setBackground(background(CARD, true));
+        logo.setContentDescription("Логотип Лавка Вкуса");
+
+        header.addView(
+                logo,
+                new LinearLayout.LayoutParams(dp(58), dp(58))
+        );
+
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titles.setPadding(dp(12), 0, 0, 0);
+
+        titles.addView(bold("Лавка Вкуса", 25, WHITE));
+        titles.addView(text(
+                "Рыба · Морепродукты · Раки",
+                12,
+                MUTED
+        ));
+
+        header.addView(
+                titles,
+                new LinearLayout.LayoutParams(0, -2, 1)
+        );
+
+        content.addView(header);
+
+        content.addView(text(
+                "Макеевка  •  Доставка и самовывоз",
+                13,
+                GOLD
+        ));
+    }
+
+    private void drawNavigation() {
+        for (int i = 0; i < tabs.length; i++) {
+            final int tab = i;
+
+            String label = tabs[i];
+
+            if (i == 3 && !cart.isEmpty()) {
+                label += " (" + cart.size() + ")";
+            }
+
+            TextView item = text(
+                    tabIcons[i] + "\n" + label,
+                    10,
+                    i == currentTab ? BLACK : MUTED
+            );
+
+            item.setGravity(Gravity.CENTER);
+            item.setPadding(dp(1), dp(5), dp(1), dp(5));
+
+            if (i == currentTab) {
+                item.setBackground(background(GOLD, false));
+                item.setTypeface(null, Typeface.BOLD);
+            }
+
+            item.setContentDescription(label);
+            item.setOnClickListener(v -> openTab(tab));
+
+            LinearLayout.LayoutParams params =
+                    new LinearLayout.LayoutParams(0, dp(58), 1);
+
+            params.setMargins(dp(2), 0, dp(2), 0);
+            navigation.addView(item, params);
+        }
     }
 
     private void showHome() {
         LinearLayout banner = panel();
 
+        GradientDrawable gradient = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{
+                        Color.rgb(68, 54, 23),
+                        Color.rgb(30, 29, 25),
+                        CARD
+                }
+        );
+
+        gradient.setCornerRadius(dp(18));
+        gradient.setStroke(dp(1), LINE);
+        banner.setBackground(gradient);
+
         banner.addView(text(
-                "Свежий выбор для вашего стола",
-                23,
+                "ВКУС, КОТОРЫЙ ОБЪЕДИНЯЕТ",
+                11,
                 GOLD
         ));
 
-        banner.addView(text(
-                "Бесплатная доставка от 2 000 ₽ по Макеевке, " +
-                "Донецку и Харцызску.",
-                16,
+        banner.addView(bold(
+                "К вашему столу —\nс заботой и вкусом",
+                28,
                 WHITE
         ));
 
         banner.addView(text(
-                "Другие города и заказы до 2 000 ₽ — " +
-                "доставка по согласованию. Оплата при получении.",
-                13,
-                MUTED
+                "Рыба, морепродукты и живые раки.\n" +
+                "Выбирайте в приложении — " +
+                "оплачивайте при получении.",
+                15,
+                WHITE
         ));
 
         banner.addView(button(
-                "Перейти в каталог",
+                "Выбрать товары",
+                () -> openTab(1)
+        ));
+
+        LinearLayout shipping = panel();
+
+        shipping.addView(bold(
+                "Доставка от 2 000 ₽ — бесплатно",
+                18,
+                GOLD
+        ));
+
+        shipping.addView(text(DELIVERY, 14, MUTED));
+
+        section("Категории");
+        categoryChips();
+
+        section("Наш ассортимент");
+
+        List<Product> preview = new ArrayList<>();
+
+        for (int i = 0; i < Math.min(6, products.size()); i++) {
+            preview.add(products.get(i));
+        }
+
+        productGrid(preview);
+
+        if (products.isEmpty() && freshCatalog) {
+            content.addView(text(
+                    "Скоро здесь появятся товары.",
+                    16,
+                    MUTED
+            ));
+        }
+
+        content.addView(secondary(
+                "Весь каталог",
                 () -> openTab(1)
         ));
 
         LinearLayout pickup = panel();
+        pickup.addView(bold("Ждём вас в магазине", 20, GOLD));
+        pickup.addView(text(PICKUP, 15, WHITE));
 
-        pickup.addView(text(
-                "Самовывоз",
-                19,
-                GOLD
+        content.addView(secondary(
+                "Обновить ассортимент",
+                this::loadCatalog
         ));
+    }
 
-        pickup.addView(text(
-                "г. Макеевка, ул. Плеханова, 1в\n" +
-                "Магазин «Лавка Вкуса»",
-                16,
-                WHITE
-        ));
+    private void categoryChips() {
+        HorizontalScrollView horizontal =
+                new HorizontalScrollView(this);
 
-        content.addView(text(
-                "Категории",
-                21,
-                WHITE
-        ));
+        horizontal.setHorizontalScrollBarEnabled(false);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+
+        addCategoryChip(row, "Все товары", "");
 
         Set<String> categories = new LinkedHashSet<>();
 
@@ -533,86 +641,77 @@ public class StoreActivity extends Activity {
             categories.add(product.category);
         }
 
-        for (String name : categories) {
-            content.addView(button(name, () -> {
-                category = name;
-                search = "";
-                openTab(1);
-            }));
+        for (String value : categories) {
+            addCategoryChip(row, value, value);
         }
 
-        content.addView(text(
-                "Наш ассортимент",
-                21,
-                WHITE
-        ));
+        horizontal.addView(row);
+        content.addView(horizontal);
+    }
 
-        for (int i = 0; i < Math.min(3, products.size()); i++) {
-            productCard(products.get(i));
+    private void addCategoryChip(
+            LinearLayout row,
+            String title,
+            String value
+    ) {
+        Button chip = secondary(title, () -> {
+            category = value;
+            search = "";
+            openTab(1);
+        });
+
+        if (category.equals(value)) {
+            chip.setTextColor(BLACK);
+            chip.setBackgroundTintList(
+                    ColorStateList.valueOf(GOLD)
+            );
         }
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(-2, dp(50));
+
+        params.setMargins(0, 0, dp(8), 0);
+        row.addView(chip, params);
     }
 
     private void showCatalog(boolean onlyFavorites) {
-        content.addView(text(
-                onlyFavorites ? "Избранное" : "Каталог",
-                23,
-                WHITE
-        ));
+        section(onlyFavorites ? "Избранное" : "Каталог");
 
         if (!onlyFavorites) {
             EditText query = input(
                     content,
-                    "Поиск по названию",
+                    "Поиск товара",
                     search,
-                    InputType.TYPE_CLASS_TEXT
+                    InputType.TYPE_CLASS_TEXT,
+                    100
             );
 
             content.addView(button("Найти", () -> {
-                search = query
-                        .getText()
-                        .toString()
-                        .trim();
-
-                saveProfile();
-                render();
+                search = query.getText().toString().trim();
+                redraw();
             }));
 
-            if (!category.isEmpty() || !search.isEmpty()) {
-                content.addView(text(
-                        category.isEmpty()
-                                ? "Все категории"
-                                : category,
-                        14,
-                        GOLD
-                ));
+            categoryChips();
 
-                content.addView(button(
-                        "Сбросить фильтр",
+            if (!search.isEmpty() || !category.isEmpty()) {
+                content.addView(secondary(
+                        "Сбросить поиск и категорию",
                         () -> {
-                            category = "";
                             search = "";
-                            saveProfile();
-                            render();
+                            category = "";
+                            redraw();
                         }
                 ));
             }
         }
 
-        int count = 0;
-
-        String query = search.toLowerCase(
-                Locale.ROOT
-        );
+        List<Product> found = new ArrayList<>();
+        String query = search.toLowerCase(Locale.ROOT);
 
         for (Product product : products) {
-            if (
-                    onlyFavorites &&
-                    !favorites.contains(product.id)
-            ) {
-                continue;
-            }
-
-            if (!onlyFavorites) {
+            if (onlyFavorites) {
+                if (!favorites.contains(product.id)) continue;
+            } else {
                 if (
                         !category.isEmpty() &&
                         !category.equals(product.category)
@@ -620,36 +719,294 @@ public class StoreActivity extends Activity {
                     continue;
                 }
 
+                String searchable =
+                        product.name + " " +
+                        product.category + " " +
+                        product.description;
+
                 if (
-                        !product.name
-                                .toLowerCase(Locale.ROOT)
+                        !searchable.toLowerCase(Locale.ROOT)
                                 .contains(query)
                 ) {
                     continue;
                 }
             }
 
-            productCard(product);
-            count++;
+            found.add(product);
         }
 
-        if (count == 0) {
-            content.addView(text(
+        content.addView(text(
+                "Товаров: " + found.size(),
+                13,
+                MUTED
+        ));
+
+        productGrid(found);
+
+        if (found.isEmpty()) {
+            LinearLayout empty = panel();
+
+            empty.addView(text(
                     onlyFavorites
-                            ? "Добавляйте любимые товары " +
-                              "кнопкой «В избранное»."
-                            : "Подходящих товаров пока нет.",
+                            ? "Здесь будут ваши любимые товары. " +
+                              "Нажимайте ♡ на карточках."
+                            : "Ничего не найдено. Попробуйте " +
+                              "другой запрос или категорию.",
                     16,
                     MUTED
             ));
         }
+
+        if (!onlyFavorites) {
+            content.addView(secondary(
+                    "Обновить каталог",
+                    this::loadCatalog
+            ));
+        }
+    }
+
+    private void productGrid(List<Product> list) {
+        int columns =
+                getResources().getConfiguration().screenWidthDp < 340
+                        ? 1 : 2;
+
+        for (int start = 0; start < list.size(); start += columns) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setBaselineAligned(false);
+
+            for (int column = 0; column < columns; column++) {
+                int index = start + column;
+
+                LinearLayout.LayoutParams params =
+                        new LinearLayout.LayoutParams(0, -1, 1);
+
+                params.setMargins(
+                        column == 0 ? 0 : dp(5),
+                        dp(6),
+                        column == columns - 1 ? 0 : dp(5),
+                        dp(6)
+                );
+
+                if (index < list.size()) {
+                    row.addView(
+                            compactCard(list.get(index)),
+                            params
+                    );
+                } else {
+                    row.addView(new View(this), params);
+                }
+            }
+
+            content.addView(
+                    row,
+                    new LinearLayout.LayoutParams(-1, -2)
+            );
+        }
+    }
+
+    private LinearLayout compactCard(Product product) {
+        LinearLayout card = box(false);
+        card.setPadding(dp(9), dp(9), dp(9), dp(9));
+
+        ProductPhoto picture = new ProductPhoto(
+                this,
+                product.name,
+                product.category,
+                product.imageUrl
+        );
+
+        picture.setOnClickListener(v -> showProduct(product));
+        picture.setContentDescription(
+                "Открыть товар: " + product.name
+        );
+
+        card.addView(
+                picture,
+                new LinearLayout.LayoutParams(-1, dp(132))
+        );
+
+        card.addView(text(product.category, 11, MUTED));
+
+        TextView name = bold(product.name, 15, WHITE);
+        name.setMinLines(2);
+        name.setOnClickListener(v -> showProduct(product));
+        card.addView(name);
+
+        card.addView(bold(
+                money(product.price) + " / " + product.unit,
+                17,
+                GOLD
+        ));
+
+        Button favorite = secondary(
+                favorites.contains(product.id)
+                        ? "♥ Сохранено" : "♡ Сохранить",
+                () -> toggleFavorite(product)
+        );
+
+        favorite.setTextSize(12);
+        card.addView(favorite);
+
+        addQuantityControls(card, product);
+
+        return card;
+    }
+
+    private void showProduct(Product product) {
+        if (destroyed) return;
+
+        ScrollView body = new ScrollView(this);
+        LinearLayout detail = box(false);
+
+        detail.addView(
+                new ProductPhoto(
+                        this,
+                        product.name,
+                        product.category,
+                        product.imageUrl
+                ),
+                new LinearLayout.LayoutParams(-1, dp(230))
+        );
+
+        detail.addView(text(product.category, 13, MUTED));
+        detail.addView(bold(product.name, 23, WHITE));
+
+        detail.addView(bold(
+                money(product.price) + " / " + product.unit,
+                24,
+                GOLD
+        ));
+
+        detail.addView(text(
+                product.description.isEmpty()
+                        ? "Подробности о товаре можно уточнить " +
+                          "при подтверждении заказа."
+                        : product.description,
+                16,
+                WHITE
+        ));
+
+        detail.addView(text(
+                "Сейчас количество выбирается целыми единицами: " +
+                product.unit + ". Оплата при получении.",
+                13,
+                MUTED
+        ));
+
+        body.addView(detail);
+
+        AlertDialog dialog = dialogBuilder()
+                .setView(body)
+                .setNegativeButton("Закрыть", null)
+                .setPositiveButton(
+                        "Добавить 1 " + product.unit,
+                        null
+                )
+                .create();
+
+        dialog.show();
+        decorateDialog(dialog);
+
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    if (changeQuantity(product, 1)) {
+                        dialog.dismiss();
+
+                        Toast.makeText(
+                                this,
+                                "Товар добавлен в корзину",
+                                Toast.LENGTH_SHORT
+                        ).show();
+                    }
+                });
+    }
+
+    private void toggleFavorite(Product product) {
+        if (!favorites.add(product.id)) {
+            favorites.remove(product.id);
+        }
+
+        prefs.edit()
+                .putStringSet(
+                        "favorites_v2",
+                        new HashSet<>(favorites)
+                )
+                .apply();
+
+        redraw();
+    }
+
+    private void addQuantityControls(
+            LinearLayout parent,
+            Product product
+    ) {
+        int value = quantity(product.id);
+
+        if (value == 0) {
+            parent.addView(button(
+                    "В корзину",
+                    () -> changeQuantity(product, 1)
+            ));
+            return;
+        }
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button minus = secondary(
+                "−",
+                () -> changeQuantity(product, -1)
+        );
+
+        minus.setContentDescription(
+                "Уменьшить количество: " + product.name
+        );
+
+        Button plus = button(
+                "+",
+                () -> changeQuantity(product, 1)
+        );
+
+        plus.setContentDescription(
+                "Увеличить количество: " + product.name
+        );
+
+        for (Button view : new Button[]{minus, plus}) {
+            view.setMinWidth(0);
+            view.setMinimumWidth(0);
+            view.setPadding(0, 0, 0, 0);
+        }
+
+        controls.addView(
+                minus,
+                new LinearLayout.LayoutParams(dp(44), dp(48))
+        );
+
+        TextView count = bold(
+                value + " " + product.unit,
+                13,
+                WHITE
+        );
+
+        count.setGravity(Gravity.CENTER);
+
+        controls.addView(
+                count,
+                new LinearLayout.LayoutParams(0, -2, 1)
+        );
+
+        controls.addView(
+                plus,
+                new LinearLayout.LayoutParams(dp(44), dp(48))
+        );
+
+        parent.addView(controls);
     }
 
     private Product findProduct(String id) {
         for (Product product : products) {
-            if (product.id.equals(id)) {
-                return product;
-            }
+            if (product.id.equals(id)) return product;
         }
 
         return null;
@@ -664,36 +1021,34 @@ public class StoreActivity extends Activity {
         long sum = 0;
 
         for (Product product : products) {
-            sum += (long) product.price *
-                    quantity(product.id);
+            sum += (long) product.price * quantity(product.id);
         }
 
         return sum;
     }
 
-    private void change(
-            Product product,
-            int delta
-    ) {
+    private boolean changeQuantity(Product product, int delta) {
         if (pendingOrder != null || sending) {
             message(
                     "Есть неподтверждённый заказ",
                     "Сначала проверьте его отправку " +
                     "в разделе «Корзина»."
             );
-
-            return;
+            return false;
         }
 
-        saveProfile();
+        int current = quantity(product.id);
 
-        int value = Math.max(
-                0,
-                Math.min(
-                        50,
-                        quantity(product.id) + delta
-                )
-        );
+        if (delta > 0 && current >= 50) {
+            message(
+                    "Ограничение количества",
+                    "В одном заказе можно выбрать не более " +
+                    "50 единиц одного товара."
+            );
+            return false;
+        }
+
+        int value = Math.max(0, Math.min(50, current + delta));
 
         if (value == 0) {
             cart.remove(product.id);
@@ -702,119 +1057,178 @@ public class StoreActivity extends Activity {
         }
 
         saveCart();
-        render();
+        redraw();
+        return true;
     }
 
-    private void productCard(Product product) {
-        LinearLayout card = panel();
+    private void showCart() {
+        section("Корзина");
 
-        ProductArtwork artwork = new ProductArtwork(
-                this,
-                product.name,
-                product.category
-        );
+        if (pendingOrder != null) {
+            LinearLayout pending = panel();
 
-        card.addView(
-                artwork,
-                new LinearLayout.LayoutParams(
-                        -1,
-                        dp(170)
-                )
-        );
+            pending.addView(bold(
+                    "Проверим прежний заказ",
+                    20,
+                    GOLD
+            ));
 
-        card.addView(text(
-                product.category,
-                13,
+            pending.addView(text(
+                    "Результат предыдущей отправки не подтверждён. " +
+                    "Проверка использует тот же идентификатор " +
+                    "и не создаёт новый заказ с ним.",
+                    14,
+                    WHITE
+            ));
+
+            Button retry = button(
+                    sending ? "Проверяем…" : "Проверить прежний заказ",
+                    this::confirmPending
+            );
+
+            retry.setEnabled(!sending);
+            pending.addView(retry);
+        }
+
+        if (cart.isEmpty()) {
+            LinearLayout empty = panel();
+
+            empty.addView(bold("Пока здесь пусто", 22, WHITE));
+            empty.addView(text(
+                    "Самое время выбрать что-нибудь вкусное.",
+                    15,
+                    MUTED
+            ));
+
+            empty.addView(button(
+                    "Открыть каталог",
+                    () -> openTab(1)
+            ));
+
+            return;
+        }
+
+        for (String id : new ArrayList<>(cart.keySet())) {
+            Product product = findProduct(id);
+
+            if (product == null) {
+                LinearLayout unavailable = panel();
+
+                unavailable.addView(text(
+                        "Товар временно недоступен в каталоге.",
+                        15,
+                        GOLD
+                ));
+
+                if (pendingOrder == null && !sending) {
+                    unavailable.addView(secondary(
+                            "Убрать недоступный товар",
+                            () -> {
+                                cart.remove(id);
+                                saveCart();
+                                redraw();
+                            }
+                    ));
+                }
+
+                continue;
+            }
+
+            LinearLayout item = panel();
+
+            item.addView(
+                    new ProductPhoto(
+                            this,
+                            product.name,
+                            product.category,
+                            product.imageUrl
+                    ),
+                    new LinearLayout.LayoutParams(-1, dp(150))
+            );
+
+            item.addView(bold(product.name, 20, WHITE));
+
+            item.addView(text(
+                    money(product.price) + " / " + product.unit,
+                    15,
+                    MUTED
+            ));
+
+            addQuantityControls(item, product);
+
+            item.addView(bold(
+                    "Сумма: " + money(
+                            (long) product.price * quantity(product.id)
+                    ),
+                    18,
+                    GOLD
+            ));
+        }
+
+        LinearLayout summary = panel();
+
+        summary.addView(bold(
+                "Товары: " + money(total()),
+                25,
+                GOLD
+        ));
+
+        summary.addView(text(DELIVERY, 14, MUTED));
+        summary.addView(text(
+                "Самовывоз: " + PICKUP,
+                14,
                 MUTED
         ));
 
-        card.addView(text(
-                product.name,
+        summary.addView(bold(
+                "Оплата при получении",
+                17,
+                WHITE
+        ));
+
+        if (pendingOrder != null) return;
+
+        summary.addView(bold(
+                "Данные для заказа",
                 20,
                 WHITE
         ));
 
-        card.addView(text(
-                product.price + " ₽ / " + product.unit,
-                21,
-                GOLD
+        customerFields(summary, true);
+
+        Button send = button(
+                sending ? "Отправляем…" : "Оформить заказ",
+                this::prepareOrder
+        );
+
+        send.setEnabled(freshCatalog && !sending);
+        summary.addView(send);
+
+        summary.addView(secondary(
+                "Очистить корзину",
+                this::confirmClearCart
         ));
+    }
 
-        if (!product.description.isEmpty()) {
-            card.addView(text(
-                    product.description,
-                    14,
-                    MUTED
-            ));
-        }
+    private void confirmClearCart() {
+        if (sending || pendingOrder != null) return;
 
-        LinearLayout controls = new LinearLayout(this);
-
-        controls.setGravity(
-                Gravity.CENTER_VERTICAL
-        );
-
-        controls.addView(
-                button(
-                        "−",
-                        () -> change(product, -1)
-                ),
-                new LinearLayout.LayoutParams(
-                        dp(62),
-                        dp(50)
-                )
-        );
-
-        TextView count = text(
-                quantity(product.id) + " " + product.unit,
-                17,
-                WHITE
-        );
-
-        count.setGravity(Gravity.CENTER);
-
-        controls.addView(
-                count,
-                new LinearLayout.LayoutParams(
-                        0,
-                        -2,
-                        1
-                )
-        );
-
-        controls.addView(
-                button(
-                        "+",
-                        () -> change(product, 1)
-                ),
-                new LinearLayout.LayoutParams(
-                        dp(62),
-                        dp(50)
-                )
-        );
-
-        card.addView(controls);
-
-        card.addView(button(
-                favorites.contains(product.id)
-                        ? "♥ В избранном"
-                        : "♡ В избранное",
-                () -> {
-                    if (!favorites.add(product.id)) {
-                        favorites.remove(product.id);
-                    }
-
-                    prefs.edit()
-                            .putStringSet(
-                                    "favorites_v2",
-                                    new HashSet<>(favorites)
-                            )
-                            .apply();
+        AlertDialog dialog = dialogBuilder()
+                .setTitle("Очистить корзину?")
+                .setMessage("Все выбранные товары будут убраны.")
+                .setNegativeButton("Оставить", null)
+                .setPositiveButton("Очистить", (d, which) -> {
+                    if (sending || pendingOrder != null) return;
 
                     saveProfile();
-                    render();
-                }
-        ));
+                    cart.clear();
+                    saveCart();
+                    render(false);
+                })
+                .create();
+
+        dialog.show();
+        decorateDialog(dialog);
     }
 
     private void customerFields(
@@ -826,14 +1240,16 @@ public class StoreActivity extends Activity {
                 "Ваше имя",
                 customerName,
                 InputType.TYPE_CLASS_TEXT |
-                InputType.TYPE_TEXT_FLAG_CAP_WORDS
+                InputType.TYPE_TEXT_FLAG_CAP_WORDS,
+                80
         );
 
         phoneInput = input(
                 parent,
                 "Телефон: +7…",
                 customerPhone,
-                InputType.TYPE_CLASS_PHONE
+                InputType.TYPE_CLASS_PHONE,
+                32
         );
 
         if (!order) {
@@ -842,20 +1258,17 @@ public class StoreActivity extends Activity {
                     "Адрес доставки",
                     customerAddress,
                     InputType.TYPE_CLASS_TEXT |
-                    InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                    InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
+                    250
             );
-
             return;
         }
 
         Switch mode = new Switch(this);
-
-        mode.setText(
-                "Доставка — выключите для самовывоза"
-        );
-
+        mode.setText("Доставка");
         mode.setTextColor(WHITE);
-        mode.setTextSize(14);
+        mode.setTextSize(16);
+        mode.setPadding(0, dp(14), 0, dp(14));
         mode.setChecked(delivery);
 
         mode.setThumbTintList(
@@ -864,38 +1277,54 @@ public class StoreActivity extends Activity {
 
         parent.addView(mode);
 
+        TextView modeHint = text(
+                delivery
+                        ? "Привезём по указанному адресу."
+                        : "Самовывоз:\n" + PICKUP,
+                13,
+                MUTED
+        );
+
+        parent.addView(modeHint);
+
         addressInput = input(
                 parent,
                 "Город, улица, дом, квартира",
                 customerAddress,
                 InputType.TYPE_CLASS_TEXT |
-                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES,
+                250
         );
 
-        addressInput.setVisibility(
+        final EditText addressField = addressInput;
+
+        addressField.setVisibility(
                 delivery ? View.VISIBLE : View.GONE
         );
 
-        mode.setOnCheckedChangeListener(
-                (view, checked) -> {
-                    delivery = checked;
+        mode.setOnCheckedChangeListener((view, checked) -> {
+            delivery = checked;
 
-                    addressInput.setVisibility(
-                            checked
-                                    ? View.VISIBLE
-                                    : View.GONE
-                    );
+            addressField.setVisibility(
+                    checked ? View.VISIBLE : View.GONE
+            );
 
-                    saveProfile();
-                }
-        );
+            modeHint.setText(
+                    checked
+                            ? "Привезём по указанному адресу."
+                            : "Самовывоз:\n" + PICKUP
+            );
+
+            saveProfile();
+        });
 
         commentInput = input(
                 parent,
                 "Комментарий к заказу",
                 customerComment,
                 InputType.TYPE_CLASS_TEXT |
-                InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE,
+                300
         );
 
         CheckBox agreement = new CheckBox(this);
@@ -907,6 +1336,7 @@ public class StoreActivity extends Activity {
 
         agreement.setTextColor(MUTED);
         agreement.setTextSize(13);
+        agreement.setPadding(0, dp(10), 0, dp(10));
 
         agreement.setButtonTintList(
                 ColorStateList.valueOf(GOLD)
@@ -921,139 +1351,21 @@ public class StoreActivity extends Activity {
         parent.addView(agreement);
     }
 
-    private void showCart() {
-        content.addView(text(
-                "Корзина",
-                23,
-                WHITE
-        ));
-
-        if (pendingOrder != null) {
-            LinearLayout pending = panel();
-
-            pending.addView(text(
-                    "Есть неподтверждённый заказ",
-                    19,
-                    GOLD
-            ));
-
-            pending.addView(text(
-                    "Проверка отправит тот же идентификатор заказа. " +
-                    "Сервер не создаст второй заказ " +
-                    "с тем же идентификатором.",
-                    14,
-                    MUTED
-            ));
-
-            Button retry = button(
-                    sending
-                            ? "Проверяем…"
-                            : "Проверить прежний заказ",
-                    this::confirmPending
-            );
-
-            retry.setEnabled(!sending);
-            pending.addView(retry);
-        }
-
-        for (String id : cart.keySet()) {
-            if (findProduct(id) == null) {
-                content.addView(text(
-                        "В корзине есть недоступный товар: " + id,
-                        14,
-                        GOLD
-                ));
-            }
-        }
-
-        for (Product product : products) {
-            if (quantity(product.id) > 0) {
-                productCard(product);
-            }
-        }
-
-        if (cart.isEmpty()) {
-            content.addView(text(
-                    "Ваша корзина пока пуста.",
-                    17,
-                    MUTED
-            ));
-
-            content.addView(button(
-                    "Выбрать товары",
-                    () -> openTab(1)
-            ));
-
-            return;
-        }
-
-        LinearLayout summary = panel();
-
-        summary.addView(text(
-                "Товары: " + total() + " ₽",
-                23,
-                GOLD
-        ));
-
-        summary.addView(text(
-                "От 2 000 ₽ — бесплатная доставка по Макеевке, " +
-                "Донецку и Харцызску. Иначе стоимость согласуется. " +
-                "Самовывоз: ул. Плеханова, 1в.",
-                14,
-                MUTED
-        ));
-
-        summary.addView(text(
-                "Оплата при получении",
-                16,
-                WHITE
-        ));
-
-        if (pendingOrder != null) return;
-
-        customerFields(summary, true);
-
-        Button send = button(
-                sending
-                        ? "Отправляем…"
-                        : "Оформить заказ",
-                this::prepareOrder
-        );
-
-        send.setEnabled(
-                freshCatalog && !sending
-        );
-
-        summary.addView(send);
-
-        summary.addView(button(
-                "Очистить корзину",
-                () -> {
-                    if (sending || pendingOrder != null) {
-                        return;
-                    }
-
-                    saveProfile();
-                    cart.clear();
-                    saveCart();
-                    render();
-                }
-        ));
-    }
-
     private void showProfile() {
-        content.addView(text(
-                "Профиль покупателя",
-                23,
-                WHITE
-        ));
+        section("Мой профиль");
 
         LinearLayout profile = panel();
 
+        profile.addView(bold(
+                "Данные покупателя",
+                21,
+                WHITE
+        ));
+
         profile.addView(text(
-                "Данные сохраняются только на этом устройстве. " +
-                "Это не регистрация и не личный кабинет на сервере.",
-                14,
+                "Сохраняются на этом телефоне. " +
+                "Регистрация на сервере пока не подключена.",
+                13,
                 MUTED
         ));
 
@@ -1063,37 +1375,81 @@ public class StoreActivity extends Activity {
                 "Сохранить данные",
                 () -> {
                     saveProfile();
-
                     message(
-                            "Готово",
-                            "Данные сохранены на этом устройстве."
+                            "Данные сохранены",
+                            "При следующем заказе поля " +
+                            "будут заполнены автоматически."
                     );
                 }
         ));
 
-        LinearLayout history = panel();
+        LinearLayout order = panel();
 
-        history.addView(text(
-                "Последний заказ с этого устройства",
+        order.addView(bold(
+                "Последний подтверждённый заказ",
                 19,
                 GOLD
         ));
 
-        history.addView(text(
+        order.addView(text(
                 prefs.getString(
                         "last_order_v2",
-                        "Подтверждённых заказов пока нет."
+                        "Вы ещё не оформляли подтверждённых " +
+                        "заказов с этого телефона."
                 ),
-                15,
+                16,
                 WHITE
         ));
 
-        history.addView(text(
-                "Отслеживание статуса покупателем " +
-                "пока не подключено.",
+        order.addView(text(
+                "История всех заказов и отслеживание " +
+                "статуса пока не подключены.",
                 13,
                 MUTED
         ));
+
+        if (pendingOrder != null) {
+            order.addView(button(
+                    "Проверить неподтверждённый заказ",
+                    () -> openTab(3)
+            ));
+        }
+
+        LinearLayout shop = panel();
+        shop.addView(bold("Наш магазин", 20, GOLD));
+        shop.addView(text(PICKUP, 16, WHITE));
+        shop.addView(text(DELIVERY, 14, MUTED));
+        shop.addView(text(
+                "Оплата при получении. Подтверждение " +
+                "и детали заказа согласует продавец.",
+                14,
+                MUTED
+        ));
+    }
+
+    private String stringValue(JSONObject object, String key) {
+        if (!object.has(key) || object.isNull(key)) return "";
+        return object.optString(key, "").trim();
+    }
+
+    private String productImage(JSONObject item) {
+        String[] keys = {
+                "imageUrl",
+                "image_url",
+                "photoUrl",
+                "photo_url",
+                "image"
+        };
+
+        for (String key : keys) {
+            String value = stringValue(item, key);
+
+            if (value.startsWith("https://")) {
+                return value;
+            }
+        }
+
+        return "";
     }
 
     private void loadCatalog() {
@@ -1101,7 +1457,7 @@ public class StoreActivity extends Activity {
 
         saveProfile();
         loading = true;
-        render();
+        render(true);
 
         api.loadProducts(new ShopApi.Callback() {
             @Override
@@ -1109,46 +1465,42 @@ public class StoreActivity extends Activity {
                 if (destroyed) return;
 
                 try {
-                    JSONArray array = data.getJSONArray(
-                            "products"
-                    );
-
+                    JSONArray array = data.getJSONArray("products");
                     List<Product> loaded = new ArrayList<>();
+                    Set<String> ids = new HashSet<>();
 
                     for (int i = 0; i < array.length(); i++) {
                         JSONObject item = array.getJSONObject(i);
 
+                        if (!item.optBoolean("available", true)) {
+                            continue;
+                        }
+
                         Product product = new Product();
+                        product.id = stringValue(item, "id");
+                        product.name = stringValue(item, "name");
+                        product.category = stringValue(item, "category");
+                        product.description =
+                                stringValue(item, "description");
+                        product.unit = stringValue(item, "unit");
+                        product.imageUrl = productImage(item);
+                        product.price = item.getInt("priceRub");
 
-                        product.id = item.getString("id");
-                        product.name = item.getString("name");
+                        if (product.category.isEmpty()) {
+                            product.category = "Каталог";
+                        }
 
-                        product.category = item.optString(
-                                "category",
-                                "Каталог"
-                        );
-
-                        product.description = item.optString(
-                                "description",
-                                ""
-                        );
-
-                        product.unit = item.optString(
-                                "unit",
-                                "кг"
-                        );
-
-                        product.price = item.getInt(
-                                "priceRub"
-                        );
+                        if (product.unit.isEmpty()) {
+                            product.unit = "кг";
+                        }
 
                         if (
+                                product.id.isEmpty() ||
+                                product.name.isEmpty() ||
                                 product.price <= 0 ||
-                                product.id.isEmpty()
+                                !ids.add(product.id)
                         ) {
-                            throw new Exception(
-                                    "Некорректный товар"
-                            );
+                            throw new Exception("Некорректный товар");
                         }
 
                         loaded.add(product);
@@ -1161,20 +1513,18 @@ public class StoreActivity extends Activity {
 
                     freshCatalog = true;
                     loading = false;
-
-                    render();
+                    render(true);
 
                 } catch (Exception error) {
                     saveProfile();
-
-                    loading = false;
                     freshCatalog = false;
-
-                    render();
+                    loading = false;
+                    render(true);
 
                     message(
-                            "Ошибка",
-                            "Не удалось прочитать каталог."
+                            "Ошибка каталога",
+                            "Не удалось прочитать товары. " +
+                            "Попробуйте обновить каталог."
                     );
                 }
             }
@@ -1184,16 +1534,11 @@ public class StoreActivity extends Activity {
                 if (destroyed) return;
 
                 saveProfile();
-
-                loading = false;
                 freshCatalog = false;
+                loading = false;
+                render(true);
 
-                render();
-
-                message(
-                        "Каталог",
-                        error.getMessage()
-                );
+                message("Каталог", error.getMessage());
             }
         });
     }
@@ -1203,29 +1548,30 @@ public class StoreActivity extends Activity {
 
         saveProfile();
 
-        String phone = customerPhone.replaceAll(
-                "[^0-9]",
-                ""
-        );
+        String phone = customerPhone.replaceAll("[^0-9]", "");
 
         if (!freshCatalog || cart.isEmpty()) {
             message(
                     "Проверьте заказ",
-                    "Загрузите каталог и выберите товары."
+                    "Обновите каталог и выберите товары."
             );
-
             return;
         }
 
-        if (
-                customerName.length() < 2 ||
-                customerName.length() > 80
-        ) {
+        if (cart.size() > 100) {
+            message(
+                    "Слишком много позиций",
+                    "В одном заказе допускается до 100 " +
+                    "разных товаров."
+            );
+            return;
+        }
+
+        if (customerName.length() < 2 || customerName.length() > 80) {
             message(
                     "Проверьте имя",
                     "Введите имя от 2 до 80 символов."
             );
-
             return;
         }
 
@@ -1234,7 +1580,6 @@ public class StoreActivity extends Activity {
                     "Проверьте телефон",
                     "Пример: +7 949 123-45-67."
             );
-
             return;
         }
 
@@ -1247,9 +1592,8 @@ public class StoreActivity extends Activity {
         ) {
             message(
                     "Проверьте адрес",
-                    "Укажите полный адрес до 250 символов."
+                    "Введите полный адрес от 5 до 250 символов."
             );
-
             return;
         }
 
@@ -1258,16 +1602,15 @@ public class StoreActivity extends Activity {
                     "Комментарий",
                     "Допускается не более 300 символов."
             );
-
             return;
         }
 
         if (!consent) {
             message(
                     "Согласие",
-                    "Подтвердите передачу данных для заказа."
+                    "Подтвердите передачу данных " +
+                    "магазину для обработки заказа."
             );
-
             return;
         }
 
@@ -1277,49 +1620,25 @@ public class StoreActivity extends Activity {
             for (Map.Entry<String, Integer> entry : cart.entrySet()) {
                 if (findProduct(entry.getKey()) == null) {
                     message(
-                            "Товар недоступен",
-                            "Очистите корзину и выберите " +
-                            "доступные товары."
+                            "Есть недоступный товар",
+                            "Уберите недоступный товар из корзины " +
+                            "перед оформлением."
                     );
-
                     return;
                 }
 
                 JSONObject item = new JSONObject();
-
-                item.put(
-                        "productId",
-                        entry.getKey()
-                );
-
-                item.put(
-                        "quantity",
-                        entry.getValue()
-                );
-
+                item.put("productId", entry.getKey());
+                item.put("quantity", entry.getValue());
                 items.put(item);
             }
 
             JSONObject order = new JSONObject();
-
-            order.put(
-                    "requestId",
-                    UUID.randomUUID().toString()
-            );
-
+            order.put("requestId", UUID.randomUUID().toString());
             order.put("name", customerName);
             order.put("phone", phone);
-
-            order.put(
-                    "fulfillment",
-                    delivery ? "delivery" : "pickup"
-            );
-
-            order.put(
-                    "address",
-                    delivery ? customerAddress : ""
-            );
-
+            order.put("fulfillment", delivery ? "delivery" : "pickup");
+            order.put("address", delivery ? customerAddress : "");
             order.put("comment", customerComment);
             order.put("items", items);
 
@@ -1334,94 +1653,87 @@ public class StoreActivity extends Activity {
     }
 
     private void confirmNewOrder(JSONObject order) {
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = dialogBuilder()
                 .setTitle("Подтвердите заказ")
                 .setMessage(
-                        "Товары: " + total() + " ₽\n" +
-                        (delivery ? "Доставка" : "Самовывоз") +
-                        "\nОплата при получении.\n\n" +
-                        "Итоговую стоимость товаров проверит сервер. " +
-                        "Стоимость доставки при необходимости " +
+                        "Товары: " + money(total()) + "\n\n" +
+                        (
+                                delivery
+                                        ? "Доставка:\n" +
+                                          order.optString("address")
+                                        : "Самовывоз:\n" + PICKUP
+                        ) +
+                        "\n\nОплата при получении.\n" +
+                        "Сервер проверит актуальные цены. " +
+                        "Если доставка платная, её стоимость " +
                         "согласует магазин."
                 )
-                .setNegativeButton(
-                        "Назад",
-                        null
-                )
-                .setPositiveButton(
-                        "Отправить",
-                        (dialog, which) -> {
-                            if (sending || pendingOrder != null) {
-                                return;
-                            }
+                .setNegativeButton("Назад", null)
+                .setPositiveButton("Отправить", (d, which) -> {
+                    if (sending || pendingOrder != null) return;
 
-                            String payload = order.toString();
+                    String payload = order.toString();
 
-                            boolean saved = prefs.edit()
-                                    .putString(
-                                            "pending_order",
-                                            payload
-                                    )
-                                    .commit();
+                    boolean saved = prefs.edit()
+                            .putString("pending_order", payload)
+                            .commit();
 
-                            if (!saved) {
-                                message(
-                                        "Ошибка",
-                                        "Не удалось сохранить заказ " +
-                                        "на устройстве. " +
-                                        "Отправка не выполнена."
-                                );
+                    if (!saved) {
+                        message(
+                                "Ошибка",
+                                "Не удалось сохранить заказ " +
+                                "на телефоне. Отправка не выполнена."
+                        );
+                        return;
+                    }
 
-                                return;
-                            }
+                    pendingOrder = payload;
+                    sendPending();
+                })
+                .create();
 
-                            pendingOrder = payload;
-                            sendPending();
-                        }
-                )
-                .show();
+        dialog.show();
+        decorateDialog(dialog);
     }
 
     private void confirmPending() {
         if (sending || pendingOrder == null) return;
 
         try {
-            JSONObject order = new JSONObject(
-                    pendingOrder
-            );
+            JSONObject order = new JSONObject(pendingOrder);
 
-            new AlertDialog.Builder(this)
+            AlertDialog dialog = dialogBuilder()
                     .setTitle("Проверить прежний заказ?")
                     .setMessage(
-                            "Будет проверен ранее сохранённый заказ:\n" +
                             order.optString("name") + "\n" +
                             order.optString("phone") + "\n" +
                             (
-                                    order.optString("fulfillment")
-                                            .equals("pickup")
+                                    "pickup".equals(
+                                            order.optString("fulfillment")
+                                    )
                                             ? "Самовывоз"
                                             : order.optString("address")
                             ) +
-                            "\n\nИспользуется прежний идентификатор. " +
-                            "Если заказ уже сохранён в базе, " +
-                            "второй такой заказ не создастся."
+                            "\n\nБудет использован прежний " +
+                            "идентификатор. Если заказ уже " +
+                            "сохранён, второй с этим " +
+                            "идентификатором не создастся."
                     )
-                    .setNegativeButton(
-                            "Назад",
-                            null
-                    )
+                    .setNegativeButton("Назад", null)
                     .setPositiveButton(
                             "Проверить",
-                            (dialog, which) -> sendPending()
+                            (d, which) -> sendPending()
                     )
-                    .show();
+                    .create();
+
+            dialog.show();
+            decorateDialog(dialog);
 
         } catch (Exception error) {
             message(
-                    "Ошибка сохранённого заказа",
-                    "Не удалось прочитать заказ. " +
-                    "Свяжитесь с магазином " +
-                    "перед повторным оформлением."
+                    "Не удалось прочитать заказ",
+                    "Свяжитесь с магазином перед повторным " +
+                    "оформлением. Не удаляйте приложение."
             );
         }
     }
@@ -1438,84 +1750,62 @@ public class StoreActivity extends Activity {
                     "Ошибка",
                     "Не удалось прочитать сохранённый заказ."
             );
-
             return;
         }
 
         saveProfile();
-
         sending = true;
-        render();
+        render(true);
 
         api.sendOrder(order, new ShopApi.Callback() {
             @Override
             public void onSuccess(JSONObject data) {
                 if (destroyed) return;
 
-                String id = data.optString(
-                        "id",
-                        ""
-                );
+                String id = data.optString("id", "");
 
-                if (
-                        id.isEmpty() ||
-                        !data.has("totalRub")
-                ) {
+                if (id.isEmpty() || !data.has("totalRub")) {
                     sending = false;
-
-                    saveProfile();
-                    render();
+                    redraw();
 
                     message(
                             "Нет подтверждения",
-                            "Ответ сервера неполный. Заказ сохранён " +
-                            "на устройстве для повторной проверки."
+                            "Ответ сервера неполный. Заказ " +
+                            "сохранён на телефоне. Используйте " +
+                            "проверку прежнего заказа."
                     );
-
                     return;
                 }
 
-                long orderNumber = data.optLong(
-                        "orderNumber",
-                        0
-                );
+                long orderNumber = data.optLong("orderNumber", 0);
 
                 String receipt =
                         (
                                 orderNumber > 0
                                         ? "Заказ № " + orderNumber
                                         : "Заказ сохранён. Номер уточняется."
-                        )
-                        + "\nТовары: "
-                        + data.optLong("totalRub")
-                        + " ₽";
+                        ) +
+                        "\nТовары: " +
+                        money(data.optLong("totalRub"));
 
                 boolean saved = prefs.edit()
                         .remove("pending_order")
-                        .putString(
-                                "last_order_v2",
-                                receipt
-                        )
-                        .putString(
-                                "cart_v2",
-                                "{}"
-                        )
+                        .putString("last_order_v2", receipt)
+                        .putString("cart_v2", "{}")
                         .commit();
 
                 sending = false;
 
                 if (!saved) {
-                    saveProfile();
-                    render();
+                    redraw();
 
                     message(
                             "Заказ сохранён магазином",
                             receipt +
                             "\n\nНе удалось обновить данные " +
-                            "на телефоне. Сохраните номер заказа. " +
+                            "телефона. Сохраните номер заказа. " +
                             "Не оформляйте его заново."
                     );
-
                     return;
                 }
 
@@ -1527,12 +1817,13 @@ public class StoreActivity extends Activity {
                 customerComment = "";
                 currentTab = 4;
 
-                render();
+                render(false);
 
                 message(
-                        "Заказ сохранён магазином",
+                        "Спасибо за заказ!",
                         receipt +
-                        "\n\nОжидайте подтверждения продавца. " +
+                        "\n\nЗаказ сохранён магазином. " +
+                        "Ожидайте подтверждения продавца. " +
                         "Оплата при получении."
                 );
             }
@@ -1544,30 +1835,42 @@ public class StoreActivity extends Activity {
                 saveProfile();
                 sending = false;
 
-                if (error.shouldClearPendingOrder()) {
+                // При конфликте идентификатора сохраняем заказ:
+                // сначала продавец должен проверить его в базе.
+                if (
+                        error.shouldClearPendingOrder() &&
+                        error.statusCode != 409
+                ) {
                     boolean removed = prefs.edit()
                             .remove("pending_order")
                             .commit();
 
-                    if (removed) {
-                        pendingOrder = null;
-                    }
+                    if (removed) pendingOrder = null;
                 }
 
-                render();
+                render(true);
+
+                String advice;
+
+                if (error.statusCode == 409) {
+                    advice =
+                            "\n\nОбнаружен конфликт идентификатора. " +
+                            "Свяжитесь с магазином для проверки. " +
+                            "Не оформляйте этот заказ заново.";
+                } else if (pendingOrder != null) {
+                    advice =
+                            "\n\nЗаказ сохранён на телефоне. " +
+                            "Используйте «Проверить прежний заказ», " +
+                            "а не создавайте новый.";
+                } else {
+                    advice =
+                            "\n\nПроверьте данные и актуальность " +
+                            "каталога перед повторной отправкой.";
+                }
 
                 message(
                         "Результат отправки",
-                        error.getMessage() +
-                        (
-                                pendingOrder != null
-                                        ? "\n\nЗаказ сохранён на устройстве. " +
-                                          "Для проверки используйте кнопку " +
-                                          "«Проверить прежний заказ», " +
-                                          "не оформляйте новый."
-                                        : "\n\nИсправьте данные " +
-                                          "перед повторной отправкой."
-                        )
+                        error.getMessage() + advice
                 );
             }
         });
