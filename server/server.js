@@ -27,6 +27,34 @@ const MAX_UPLOAD_BODY_BYTES = 7 * 1024 * 1024 + 16384;
 const PICKUP =
   "г. Макеевка, ул. Плеханова, 1в, магазин «Лавка Вкуса»";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+const ORDER_ID_PATTERN =
+  /^LV-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+const ACCESS_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+
+const ORDER_STATUSES = [
+  "new",
+  "confirmed",
+  "preparing",
+  "delivering",
+  "ready",
+  "completed",
+  "cancelled"
+];
+
+const STATUS_NAMES = {
+  new: "Новый",
+  confirmed: "Подтверждён",
+  preparing: "Собирается",
+  delivering: "В доставке",
+  ready: "Готов к самовывозу",
+  completed: "Выполнен",
+  cancelled: "Отменён"
+};
+
 const moneyFormatter = new Intl.NumberFormat("ru-RU", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 2
@@ -106,7 +134,6 @@ async function readJson(req, maxBytes = 32768) {
 
     function stop(error) {
       if (settled) return;
-
       settled = true;
       chunks = [];
       reject(error);
@@ -127,8 +154,8 @@ async function readJson(req, maxBytes = 32768) {
 
     req.on("end", () => {
       if (settled) return;
-
       settled = true;
+
       const buffer = Buffer.concat(chunks);
       chunks = [];
       resolve(buffer);
@@ -165,6 +192,29 @@ function text(value, max) {
   return value.trim().slice(0, max);
 }
 
+function sha256(value) {
+  return crypto
+    .createHash("sha256")
+    .update(value)
+    .digest("hex");
+}
+
+function sameHash(first, second) {
+  if (
+    typeof first !== "string" ||
+    typeof second !== "string" ||
+    !ACCESS_TOKEN_PATTERN.test(first) ||
+    !ACCESS_TOKEN_PATTERN.test(second)
+  ) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(first, "hex"),
+    Buffer.from(second, "hex")
+  );
+}
+
 function checkAdmin(req) {
   if (ADMIN_TOKEN.length < 32) {
     throw fail(503, "Доступ продавца ещё не настроен.");
@@ -176,17 +226,7 @@ function checkAdmin(req) {
 
   const expected = `Bearer ${ADMIN_TOKEN}`;
 
-  const a = crypto
-    .createHash("sha256")
-    .update(supplied)
-    .digest();
-
-  const b = crypto
-    .createHash("sha256")
-    .update(expected)
-    .digest();
-
-  if (!crypto.timingSafeEqual(a, b)) {
+  if (!sameHash(sha256(supplied), sha256(expected))) {
     throw fail(401, "Неверный ключ доступа продавца.");
   }
 }
@@ -214,6 +254,7 @@ function productView(row) {
   };
 }
 
+// Полные сведения доступны только продавцу.
 function orderView(row) {
   return {
     id: row.id,
@@ -230,6 +271,27 @@ function orderView(row) {
     totalRub: Number(row.total_rub),
     status: row.status,
     telegramStatus: row.telegram_status
+  };
+}
+
+// Покупатель получает только сведения,
+// необходимые для истории и проверки статуса.
+// Имя, телефон, адрес, requestId и хеш ключа
+// этот ответ не содержит.
+function customerOrderView(row) {
+  return {
+    id: row.id,
+    orderNumber: Number(row.order_number),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    fulfillment: row.fulfillment,
+    pickupAddress:
+      row.fulfillment === "pickup" ? PICKUP : "",
+    items: row.items,
+    totalRub: Number(row.total_rub),
+    status: row.status,
+    statusName: STATUS_NAMES[row.status] || "Статус уточняется",
+    payment: "on_receipt"
   };
 }
 
@@ -275,8 +337,6 @@ async function initializeDatabase() {
       )
     `);
 
-    // В старой версии сумма была INTEGER.
-    // Переводим её в NUMERIC, не удаляя старые заказы.
     const column = await client.query(`
       SELECT data_type
       FROM information_schema.columns
@@ -300,6 +360,14 @@ async function initializeDatabase() {
       ALTER TABLE lv_orders
       ADD COLUMN IF NOT EXISTS order_number BIGINT
       GENERATED ALWAYS AS IDENTITY (START WITH 1001)
+    `);
+
+    // У старых заказов остаётся NULL.
+    // Ключи доступа к старым заказам автоматически
+    // не назначаются.
+    await client.query(`
+      ALTER TABLE lv_orders
+      ADD COLUMN IF NOT EXISTS tracking_token_hash TEXT
     `);
 
     await client.query(`
@@ -337,16 +405,32 @@ async function initializeDatabase() {
   }
 }
 
+// Новое приложение должно создавать 32 случайных байта
+// и передавать их как 64 шестнадцатеричных символа
+// в поле orderAccessToken.
+// Старое приложение может не передавать это поле.
+function accessTokenHashFromInput(data) {
+  if (data.orderAccessToken === undefined) {
+    return null;
+  }
+
+  if (
+    typeof data.orderAccessToken !== "string" ||
+    !ACCESS_TOKEN_PATTERN.test(data.orderAccessToken)
+  ) {
+    throw fail(
+      400,
+      "Некорректный ключ просмотра заказа. Обновите приложение."
+    );
+  }
+
+  return sha256(data.orderAccessToken);
+}
+
 function normalizeOrder(data) {
-  const requestId = text(
-    data.requestId,
-    80
-  ).toLowerCase();
+  const requestId = text(data.requestId, 80).toLowerCase();
 
-  const uuidPattern =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-  if (!uuidPattern.test(requestId)) {
+  if (!UUID_PATTERN.test(requestId)) {
     throw fail(400, "Некорректный идентификатор заказа.");
   }
 
@@ -395,9 +479,6 @@ function normalizeOrder(data) {
     const productId = text(item.productId, 80);
     const quantity = item.quantity;
 
-    // На этом этапе разрешаем шаг 0,5.
-    // Ниже, при чтении товара из базы, проверяем:
-    // для кг — шаг 0,5; для остальных единиц — целые числа.
     if (
       !/^[a-z0-9_-]{1,80}$/.test(productId) ||
       typeof quantity !== "number" ||
@@ -426,8 +507,9 @@ function normalizeOrder(data) {
     a.productId.localeCompare(b.productId)
   );
 
-  // Порядок полей сохранён для совместимости
-  // с повторной проверкой прежних заказов.
+  // Не меняем порядок полей и состав fingerprint:
+  // повторная отправка прежних заказов совместима.
+  // Секретный ключ обрабатывается отдельно.
   return {
     requestId,
     name,
@@ -439,12 +521,8 @@ function normalizeOrder(data) {
   };
 }
 
-async function saveOrder(order) {
-  const fingerprint = crypto
-    .createHash("sha256")
-    .update(JSON.stringify(order))
-    .digest("hex");
-
+async function saveOrder(order, trackingTokenHash) {
+  const fingerprint = sha256(JSON.stringify(order));
   const client = await pool.connect();
 
   try {
@@ -470,6 +548,25 @@ async function saveOrder(order) {
         );
       }
 
+      // Нельзя заменить ключ уже созданного заказа
+      // другим ключом при повторной отправке.
+      if (
+        previous.tracking_token_hash &&
+        trackingTokenHash &&
+        !sameHash(
+          previous.tracking_token_hash,
+          trackingTokenHash
+        )
+      ) {
+        throw fail(
+          409,
+          "Ключ просмотра не совпадает с сохранённым заказом. " +
+          "Не оформляйте заказ повторно: свяжитесь с магазином."
+        );
+      }
+
+      // Старому заказу без ключа не назначаем новый ключ
+      // через повторную отправку.
       await client.query("COMMIT");
 
       return {
@@ -490,8 +587,6 @@ async function saveOrder(order) {
       found.rows.map((product) => [product.id, product])
     );
 
-    // Все денежные вычисления выполняются
-    // в целых копейках.
     let totalKopecks = 0;
 
     const snapshot = order.items.map((item) => {
@@ -559,9 +654,10 @@ async function saveOrder(order) {
         address,
         comment,
         items,
-        total_rub
+        total_rub,
+        tracking_token_hash
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11)
       RETURNING *`,
       [
         id,
@@ -573,7 +669,8 @@ async function saveOrder(order) {
         order.address,
         order.comment,
         JSON.stringify(snapshot),
-        totalRub
+        totalRub,
+        trackingTokenHash
       ]
     );
 
@@ -596,9 +693,7 @@ async function notifyTelegram(row) {
 
   if (BOT_TOKEN && CHAT_ID) {
     const lines = row.items.map((item) => {
-      const quantity = String(
-        item.quantity
-      ).replace(".", ",");
+      const quantity = String(item.quantity).replace(".", ",");
 
       return (
         `${item.name}: ${quantity} ${item.unit} × ` +
@@ -691,24 +786,18 @@ async function notifyTelegram(row) {
 
 function normalizeProduct(data, id) {
   const name = text(data.name, 120);
-
   const category =
     text(data.category, 80) || "Рыба и морепродукты";
-
   const description = text(data.description, 2000);
   const unit = text(data.unit, 20) || "кг";
   const imageUrl = text(data.imageUrl, 1500);
   const priceRub = data.priceRub;
 
   const available =
-    data.available === undefined
-      ? true
-      : data.available;
+    data.available === undefined ? true : data.available;
 
   const sortOrder =
-    data.sortOrder === undefined
-      ? 0
-      : data.sortOrder;
+    data.sortOrder === undefined ? 0 : data.sortOrder;
 
   if (!/^[a-z0-9_-]{1,80}$/.test(id)) {
     throw fail(400, "Некорректный код товара.");
@@ -778,7 +867,6 @@ let writeRequests = 0;
 
 function limitWrites(req) {
   const methods = ["POST", "PUT", "PATCH", "DELETE"];
-
   if (!methods.includes(req.method)) return;
 
   if (Date.now() - limitStarted > 60000) {
@@ -893,10 +981,7 @@ function decodeImage(data) {
     );
   }
 
-  return {
-    buffer,
-    mimeType
-  };
+  return { buffer, mimeType };
 }
 
 async function uploadImageToCloudinary(image) {
@@ -939,13 +1024,9 @@ async function uploadImageToCloudinary(image) {
 
   form.append("api_key", CLOUD_API_KEY);
   form.append("signature", signature);
-
   form.append(
     "file",
-    new Blob(
-      [image.buffer],
-      { type: image.mimeType }
-    ),
+    new Blob([image.buffer], { type: image.mimeType }),
     `product.${extension}`
   );
 
@@ -1030,6 +1111,64 @@ async function uploadImageToCloudinary(image) {
   };
 }
 
+// Проверка одного заказа по внутреннему id
+// и секретному ключу из приложения.
+// Ключ передаётся в JSON, не в адресной строке.
+async function lookupCustomerOrder(data) {
+  const id = data.id;
+  const accessToken = data.orderAccessToken;
+
+  const unavailable = () => fail(
+    404,
+    "Заказ недоступен. Проверьте, что он оформлен " +
+    "в этой версии приложения на этом телефоне."
+  );
+
+  if (
+    typeof id !== "string" ||
+    !ORDER_ID_PATTERN.test(id) ||
+    typeof accessToken !== "string" ||
+    !ACCESS_TOKEN_PATTERN.test(accessToken)
+  ) {
+    throw unavailable();
+  }
+
+  const result = await pool.query(
+    `SELECT
+       id,
+       order_number,
+       created_at,
+       updated_at,
+       fulfillment,
+       items,
+       total_rub,
+       status,
+       tracking_token_hash
+     FROM lv_orders
+     WHERE id = $1`,
+    [id]
+  );
+
+  const row = result.rows[0];
+  const suppliedHash = sha256(accessToken);
+
+  // Для отсутствующего заказа также выполняется
+  // сравнение хешей. Ответ при неверном ключе
+  // и отсутствующем заказе одинаковый.
+  const storedHash =
+    row && row.tracking_token_hash
+      ? row.tracking_token_hash
+      : "0".repeat(64);
+
+  const matches = sameHash(suppliedHash, storedHash);
+
+  if (!row || !row.tracking_token_hash || !matches) {
+    throw unavailable();
+  }
+
+  return customerOrderView(row);
+}
+
 async function handle(req, res) {
   limitWrites(req);
 
@@ -1050,7 +1189,8 @@ async function handle(req, res) {
       adminConfigured: ADMIN_TOKEN.length >= 32,
       orderNumbersEnabled: true,
       imageUploadConfigured: cloudinaryConfigured(),
-      quantityStepsEnabled: true
+      quantityStepsEnabled: true,
+      orderTrackingEnabled: true
     });
   }
 
@@ -1087,16 +1227,39 @@ async function handle(req, res) {
 
   if (
     req.method === "POST" &&
+    pathname === "/api/orders/lookup"
+  ) {
+    const data = await readJson(req, 4096);
+    const order = await lookupCustomerOrder(data);
+
+    return json(res, 200, {
+      ok: true,
+      order
+    });
+  }
+
+  if (
+    req.method === "POST" &&
     pathname === "/api/orders"
   ) {
-    const input = normalizeOrder(await readJson(req));
-    const saved = await saveOrder(input);
+    const data = await readJson(req);
+    const trackingTokenHash = accessTokenHashFromInput(data);
+    const input = normalizeOrder(data);
+    const saved = await saveOrder(input, trackingTokenHash);
 
     let telegramStatus = saved.row.telegram_status;
 
     if (saved.created) {
       telegramStatus = await notifyTelegram(saved.row);
     }
+
+    const orderTrackingAvailable = Boolean(
+      trackingTokenHash &&
+      sameHash(
+        saved.row.tracking_token_hash,
+        trackingTokenHash
+      )
+    );
 
     return json(res, saved.created ? 201 : 200, {
       ok: true,
@@ -1105,6 +1268,7 @@ async function handle(req, res) {
       totalRub: Number(saved.row.total_rub),
       status: saved.row.status,
       telegramStatus,
+      orderTrackingAvailable,
       message: "Заказ сохранён в магазине."
     });
   }
@@ -1150,7 +1314,8 @@ async function handle(req, res) {
           "image/png",
           "image/webp"
         ],
-        quantityStepsEnabled: true
+        quantityStepsEnabled: true,
+        orderTrackingEnabled: true
       });
     }
 
@@ -1159,10 +1324,7 @@ async function handle(req, res) {
       pathname === "/api/admin/images"
     ) {
       if (!cloudinaryConfigured()) {
-        throw fail(
-          503,
-          "Хранилище фото ещё не настроено."
-        );
+        throw fail(503, "Хранилище фото ещё не настроено.");
       }
 
       limitImageUploads();
@@ -1249,10 +1411,7 @@ async function handle(req, res) {
         });
       } catch (error) {
         if (error.code === "23505") {
-          throw fail(
-            409,
-            "Товар с таким кодом уже существует."
-          );
+          throw fail(409, "Товар с таким кодом уже существует.");
         }
 
         throw error;
@@ -1321,7 +1480,7 @@ async function handle(req, res) {
 
       const result = await pool.query(
         `SELECT * FROM lv_orders
-         ORDER BY created_at DESC
+         ORDER BY created_at DESC, id DESC
          LIMIT 50 OFFSET $1`,
         [(page - 1) * 50]
       );
@@ -1338,19 +1497,13 @@ async function handle(req, res) {
     );
 
     if (req.method === "PATCH" && statusMatch) {
+      if (!ORDER_ID_PATTERN.test(statusMatch[1])) {
+        throw fail(404, "Заказ не найден.");
+      }
+
       const data = await readJson(req);
 
-      const allowed = [
-        "new",
-        "confirmed",
-        "preparing",
-        "delivering",
-        "ready",
-        "completed",
-        "cancelled"
-      ];
-
-      if (!allowed.includes(data.status)) {
+      if (!ORDER_STATUSES.includes(data.status)) {
         throw fail(400, "Некорректный статус заказа.");
       }
 
@@ -1387,6 +1540,8 @@ const server = http.createServer((req, res) => {
       : 500;
 
     if (status >= 500) {
+      // Не записываем тела запросов, ключи,
+      // пароли и персональные данные в журнал.
       console.error(
         "Ошибка обработки запроса:",
         error.code || "internal"
@@ -1413,6 +1568,7 @@ initializeDatabase()
       console.log("База данных подключена.");
       console.log("Короткие номера заказов включены.");
       console.log("Поддержка веса с шагом 0,5 кг включена.");
+      console.log("Защищённая проверка статуса заказов включена.");
 
       console.log(
         cloudinaryConfigured()
