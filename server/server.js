@@ -6,31 +6,35 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { Pool } = require("pg");
 
-// Настройки сервера.
 const PORT = Number(process.env.PORT || 3000);
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
-// Ключи Cloudinary берутся только из настроек Render.
-const CLOUD_NAME = (
-  process.env.CLOUDINARY_CLOUD_NAME || ""
-).trim();
+const CLOUD_NAME =
+  (process.env.CLOUDINARY_CLOUD_NAME || "").trim();
 
-const CLOUD_API_KEY = (
-  process.env.CLOUDINARY_API_KEY || ""
-).trim();
+const CLOUD_API_KEY =
+  (process.env.CLOUDINARY_API_KEY || "").trim();
 
-const CLOUD_API_SECRET = (
-  process.env.CLOUDINARY_API_SECRET || ""
-).trim();
+const CLOUD_API_SECRET =
+  (process.env.CLOUDINARY_API_SECRET || "").trim();
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_UPLOAD_BODY_BYTES = 7 * 1024 * 1024 + 16384;
 
 const PICKUP =
   "г. Макеевка, ул. Плеханова, 1в, магазин «Лавка Вкуса»";
+
+const moneyFormatter = new Intl.NumberFormat("ru-RU", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2
+});
+
+function rub(value) {
+  return moneyFormatter.format(Number(value)) + " ₽";
+}
 
 function cloudinaryConfigured() {
   return Boolean(
@@ -73,8 +77,6 @@ function fail(status, message) {
   return error;
 }
 
-// Обычные запросы имеют небольшой лимит.
-// Для фото отдельный маршрут разрешает более крупное тело.
 async function readJson(req, maxBytes = 32768) {
   const type = String(
     req.headers["content-type"] || ""
@@ -189,6 +191,10 @@ function checkAdmin(req) {
   }
 }
 
+function isKilogram(unit) {
+  return String(unit || "").trim().toLowerCase() === "кг";
+}
+
 function productView(row) {
   return {
     id: row.id,
@@ -201,7 +207,10 @@ function productView(row) {
     pack: `1 ${row.unit}`,
     imageUrl: row.image_url,
     available: row.available,
-    sortOrder: row.sort_order
+    sortOrder: row.sort_order,
+    quantityStep: isKilogram(row.unit) ? 0.5 : 1,
+    minQuantity: isKilogram(row.unit) ? 0.5 : 1,
+    maxQuantity: 50
   };
 }
 
@@ -218,7 +227,7 @@ function orderView(row) {
     address: row.address,
     comment: row.comment,
     items: row.items,
-    totalRub: row.total_rub,
+    totalRub: Number(row.total_rub),
     status: row.status,
     telegramStatus: row.telegram_status
   };
@@ -257,13 +266,35 @@ async function initializeDatabase() {
         address TEXT NOT NULL DEFAULT '',
         comment TEXT NOT NULL DEFAULT '',
         items JSONB NOT NULL,
-        total_rub INTEGER NOT NULL CHECK (total_rub > 0),
+        total_rub NUMERIC(12,2) NOT NULL
+          CHECK (total_rub > 0),
         status TEXT NOT NULL DEFAULT 'new',
         telegram_status TEXT NOT NULL DEFAULT 'pending',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+
+    // В старой версии сумма была INTEGER.
+    // Переводим её в NUMERIC, не удаляя старые заказы.
+    const column = await client.query(`
+      SELECT data_type
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'lv_orders'
+        AND column_name = 'total_rub'
+    `);
+
+    if (
+      column.rows.length &&
+      column.rows[0].data_type !== "numeric"
+    ) {
+      await client.query(`
+        ALTER TABLE lv_orders
+        ALTER COLUMN total_rub TYPE NUMERIC(12,2)
+        USING total_rub::NUMERIC(12,2)
+      `);
+    }
 
     await client.query(`
       ALTER TABLE lv_orders
@@ -364,14 +395,23 @@ function normalizeOrder(data) {
     const productId = text(item.productId, 80);
     const quantity = item.quantity;
 
+    // На этом этапе разрешаем шаг 0,5.
+    // Ниже, при чтении товара из базы, проверяем:
+    // для кг — шаг 0,5; для остальных единиц — целые числа.
     if (
       !/^[a-z0-9_-]{1,80}$/.test(productId) ||
-      !Number.isInteger(quantity) ||
-      quantity < 1 ||
+      typeof quantity !== "number" ||
+      !Number.isFinite(quantity) ||
+      quantity < 0.5 ||
       quantity > 50 ||
+      !Number.isInteger(quantity * 2) ||
       seen.has(productId)
     ) {
-      throw fail(400, "Проверьте товары и их количество.");
+      throw fail(
+        400,
+        "Проверьте количество товаров: " +
+        "для килограммов используется шаг 0,5."
+      );
     }
 
     seen.add(productId);
@@ -386,6 +426,8 @@ function normalizeOrder(data) {
     a.productId.localeCompare(b.productId)
   );
 
+  // Порядок полей сохранён для совместимости
+  // с повторной проверкой прежних заказов.
   return {
     requestId,
     name,
@@ -448,7 +490,9 @@ async function saveOrder(order) {
       found.rows.map((product) => [product.id, product])
     );
 
-    let totalRub = 0;
+    // Все денежные вычисления выполняются
+    // в целых копейках.
+    let totalKopecks = 0;
 
     const snapshot = order.items.map((item) => {
       const product = products.get(item.productId);
@@ -460,10 +504,28 @@ async function saveOrder(order) {
         );
       }
 
-      const lineTotal =
-        product.price_rub * item.quantity;
+      if (
+        !isKilogram(product.unit) &&
+        !Number.isInteger(item.quantity)
+      ) {
+        throw fail(
+          400,
+          `Товар «${product.name}» продаётся ` +
+          "только целым количеством."
+        );
+      }
 
-      totalRub += lineTotal;
+      const priceKopecks = product.price_rub * 100;
+      const lineKopecks = priceKopecks * item.quantity;
+
+      if (
+        !Number.isSafeInteger(lineKopecks) ||
+        lineKopecks <= 0
+      ) {
+        throw fail(400, "Некорректная сумма позиции.");
+      }
+
+      totalKopecks += lineKopecks;
 
       return {
         productId: product.id,
@@ -471,17 +533,19 @@ async function saveOrder(order) {
         unit: product.unit,
         quantity: item.quantity,
         priceRub: product.price_rub,
-        totalRub: lineTotal
+        totalRub: lineKopecks / 100
       };
     });
 
     if (
-      !Number.isSafeInteger(totalRub) ||
-      totalRub > 10000000
+      !Number.isSafeInteger(totalKopecks) ||
+      totalKopecks <= 0 ||
+      totalKopecks > 1000000000
     ) {
       throw fail(400, "Слишком большая сумма заказа.");
     }
 
+    const totalRub = (totalKopecks / 100).toFixed(2);
     const id = `LV-${crypto.randomUUID()}`;
 
     const result = await client.query(
@@ -531,16 +595,21 @@ async function notifyTelegram(row) {
   let notificationStatus = "not_configured";
 
   if (BOT_TOKEN && CHAT_ID) {
-    const lines = row.items.map(
-      (item) =>
-        `${item.name}: ${item.quantity} ${item.unit} × ` +
-        `${item.priceRub} ₽ = ${item.totalRub} ₽`
-    );
+    const lines = row.items.map((item) => {
+      const quantity = String(
+        item.quantity
+      ).replace(".", ",");
+
+      return (
+        `${item.name}: ${quantity} ${item.unit} × ` +
+        `${rub(item.priceRub)} = ${rub(item.totalRub)}`
+      );
+    });
 
     const deliveryText =
       row.fulfillment === "pickup"
         ? `Самовывоз: ${PICKUP}`
-        : row.total_rub >= 2000
+        : Number(row.total_rub) >= 2000
           ? "Бесплатная доставка по Макеевке, Донецку и Харцызску. " +
             "Другие города — по согласованию."
           : "Стоимость доставки согласуется с покупателем.";
@@ -557,7 +626,7 @@ async function notifyTelegram(row) {
       "",
       ...lines,
       "",
-      `Товары: ${row.total_rub} ₽`,
+      `Товары: ${rub(row.total_rub)}`,
       deliveryText,
       "Оплата при получении.",
       row.comment ? `Комментарий: ${row.comment}` : ""
@@ -661,10 +730,7 @@ function normalizeProduct(data, id) {
   }
 
   if (typeof available !== "boolean") {
-    throw fail(
-      400,
-      "Некорректное значение наличия товара."
-    );
+    throw fail(400, "Некорректное значение наличия товара.");
   }
 
   if (
@@ -707,7 +773,6 @@ function normalizeProduct(data, id) {
   };
 }
 
-// Общий ограничитель запросов записи.
 let limitStarted = Date.now();
 let writeRequests = 0;
 
@@ -731,8 +796,6 @@ function limitWrites(req) {
   }
 }
 
-// Дополнительные ограничения загрузки фотографий.
-// Работают после проверки ключа продавца.
 let uploadLimitStarted = Date.now();
 let uploadRequests = 0;
 let activeUploads = 0;
@@ -851,8 +914,6 @@ async function uploadImageToCloudinary(image) {
     "image/webp": "webp"
   }[image.mimeType];
 
-  // Подпись создаётся на сервере.
-  // Секретный ключ не передаётся в браузер.
   const parameters = {
     folder: "lavka-vkusa/products",
     public_id: crypto.randomUUID(),
@@ -928,15 +989,14 @@ async function uploadImageToCloudinary(image) {
       throw fail(
         502,
         "Хранилище временно ограничило загрузку. " +
-        "Проверьте лимиты Cloudinary и попробуйте позже."
+        "Проверьте лимиты Cloudinary."
       );
     }
 
     throw fail(
       502,
       "Хранилище не приняло фотографию. " +
-      "Попробуйте обычный снимок JPG или PNG. " +
-      "Если ошибка повторяется, проверьте настройки " +
+      "Попробуйте JPG или PNG. Проверьте настройки " +
       "и доступные лимиты Cloudinary."
     );
   }
@@ -989,7 +1049,8 @@ async function handle(req, res) {
       telegramConfigured: Boolean(BOT_TOKEN && CHAT_ID),
       adminConfigured: ADMIN_TOKEN.length >= 32,
       orderNumbersEnabled: true,
-      imageUploadConfigured: cloudinaryConfigured()
+      imageUploadConfigured: cloudinaryConfigured(),
+      quantityStepsEnabled: true
     });
   }
 
@@ -1041,7 +1102,7 @@ async function handle(req, res) {
       ok: true,
       id: saved.row.id,
       orderNumber: Number(saved.row.order_number),
-      totalRub: saved.row.total_rub,
+      totalRub: Number(saved.row.total_rub),
       status: saved.row.status,
       telegramStatus,
       message: "Заказ сохранён в магазине."
@@ -1077,7 +1138,6 @@ async function handle(req, res) {
   if (pathname.startsWith("/api/admin/")) {
     checkAdmin(req);
 
-    // Информация для новой панели продавца.
     if (
       req.method === "GET" &&
       pathname === "/api/admin/config"
@@ -1089,11 +1149,11 @@ async function handle(req, res) {
           "image/jpeg",
           "image/png",
           "image/webp"
-        ]
+        ],
+        quantityStepsEnabled: true
       });
     }
 
-    // Загрузка доступна только с ключом продавца.
     if (
       req.method === "POST" &&
       pathname === "/api/admin/images"
@@ -1352,6 +1412,7 @@ initializeDatabase()
       console.log("Сервер Лавки Вкуса запущен.");
       console.log("База данных подключена.");
       console.log("Короткие номера заказов включены.");
+      console.log("Поддержка веса с шагом 0,5 кг включена.");
 
       console.log(
         cloudinaryConfigured()
