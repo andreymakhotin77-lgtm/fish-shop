@@ -1,0 +1,124 @@
+name: Enable device login
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  enable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Add biometric permission
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          main = Path("android/MainActivity.java")
+          helper = Path("android/DeviceLogin.java")
+          workflow = Path(".github/workflows/build-apk.yml")
+
+          for file in (main, helper, workflow):
+              if not file.is_file() or file.stat().st_size == 0:
+                  raise SystemExit(
+                      "Missing or empty file: " + str(file)
+                  )
+
+          source = workflow.read_text(encoding="utf-8")
+
+          required = [
+              "cp android/*.java",
+              "SIGNING_PASSWORD",
+              "assembleRelease",
+              "Connect gold wave loading screen",
+              "android.permission.INTERNET"
+          ]
+
+          for fragment in required:
+              if fragment not in source:
+                  raise SystemExit(
+                      "Unexpected build workflow structure: " +
+                      fragment
+                  )
+
+          permission = "android.permission.USE_BIOMETRIC"
+
+          if permission not in source:
+              pattern = re.compile(
+                  r'^( +)<application\s*$',
+                  re.MULTILINE
+              )
+
+              matches = list(pattern.finditer(source))
+
+              if len(matches) != 1:
+                  raise SystemExit(
+                      "Cannot safely locate application manifest."
+                  )
+
+              match = matches[0]
+              indent = match.group(1)
+
+              insertion = (
+                  indent +
+                  '<uses-permission android:name="' +
+                  permission +
+                  '" />\n\n'
+              )
+
+              source = (
+                  source[:match.start()] +
+                  insertion +
+                  source[match.start():]
+              )
+
+              workflow.write_text(
+                  source,
+                  encoding="utf-8"
+              )
+
+              print("Biometric permission added.")
+          else:
+              print("Biometric permission already present.")
+
+          PY
+
+      - name: Save workflow update
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! git diff --quiet -- \
+            .github/workflows/build-apk.yml
+          then
+            git config user.name "github-actions[bot]"
+            git config user.email \
+              "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add .github/workflows/build-apk.yml
+
+            git commit \
+              -m "Enable Android biometric login permission"
+
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run build-apk.yml --ref main
