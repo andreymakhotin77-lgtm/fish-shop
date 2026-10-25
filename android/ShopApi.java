@@ -15,7 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 
-public final class ShopApi {
+public class ShopApi {
 
     private static final String BASE_URL =
             "https://fish-shop-tttj.onrender.com";
@@ -25,6 +25,10 @@ public final class ShopApi {
 
     private static final int CONNECT_TIMEOUT_MS = 20000;
     private static final int READ_TIMEOUT_MS = 120000;
+
+    private static final String ORDER_ID_PATTERN =
+            "LV-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-" +
+            "[0-9a-f]{4}-[0-9a-f]{12}";
 
     private final Handler main =
             new Handler(Looper.getMainLooper());
@@ -41,7 +45,7 @@ public final class ShopApi {
         void onError(ApiError error);
     }
 
-    public static final class ApiError extends Exception {
+    public static class ApiError extends Exception {
 
         public final int statusCode;
 
@@ -50,16 +54,18 @@ public final class ShopApi {
             this.statusCode = statusCode;
         }
 
-        /*
-         * Конфликт 409 не удаляет неподтверждённый заказ:
-         * он требует проверки, а не нового оформления.
-         */
         public boolean shouldClearPendingOrder() {
-            return statusCode == 400
-                    || statusCode == 413
-                    || statusCode == 415;
+            /*
+             * Конфликт 409 не означает, что заказ не создан.
+             * Такой запрос нельзя автоматически заменять новым.
+             */
+            return statusCode == 400 ||
+                    statusCode == 413 ||
+                    statusCode == 415;
         }
     }
+
+    // -------------------- КАТАЛОГ --------------------
 
     public void loadProducts(Callback callback) {
         request(
@@ -70,14 +76,63 @@ public final class ShopApi {
         );
     }
 
+    // -------------------- РАСПИСАНИЕ --------------------
+
+    /*
+     * Загружает все доступные будущие интервалы.
+     * В ответе находятся:
+     * slots — массив интервалов;
+     * scheduleOptions — настройки расписания.
+     */
+    public void loadReceivingSlots(Callback callback) {
+        request(
+                "GET",
+                "/api/receiving-slots",
+                null,
+                callback
+        );
+    }
+
+    /*
+     * Загружает интервалы только для выбранного
+     * способа получения: delivery или pickup.
+     */
+    public void loadReceivingSlots(
+            String fulfillment,
+            Callback callback
+    ) {
+        if (
+                !"delivery".equals(fulfillment) &&
+                !"pickup".equals(fulfillment)
+        ) {
+            postError(
+                    callback,
+                    new ApiError(
+                            0,
+                            "Выберите доставку или самовывоз."
+                    )
+            );
+            return;
+        }
+
+        request(
+                "GET",
+                "/api/receiving-slots?fulfillment=" +
+                        fulfillment,
+                null,
+                callback
+        );
+    }
+
+    // -------------------- ОФОРМЛЕНИЕ --------------------
+
     public void sendOrder(
             JSONObject order,
             Callback callback
     ) {
         /*
-         * Всё тело передаётся без изменения.
-         * В новой версии интерфейса здесь также будет
-         * поле orderAccessToken — секретный ключ заказа.
+         * Поля заказа передаются без изменения.
+         * В том числе receivingSlotId и orderAccessToken.
          */
         request(
                 "POST",
@@ -87,35 +142,18 @@ public final class ShopApi {
         );
     }
 
-    /*
-     * Получить сведения об одном заказе.
-     *
-     * Ключ передаётся в JSON по HTTPS.
-     * Он не добавляется в адресную строку.
-     *
-     * Этот метод ничего не создаёт
-     * и не меняет статус заказа.
-     */
+    // -------------------- ПРОВЕРКА ЗАКАЗА --------------------
+
     public void loadOrder(
             String orderId,
             String orderAccessToken,
             Callback callback
     ) {
-        if (callback == null || closed) {
-            return;
-        }
-
         if (
-                orderId == null
-                        || !orderId.matches(
-                        "LV-[0-9a-f]{8}-[0-9a-f]{4}-" +
-                        "[0-9a-f]{4}-[0-9a-f]{4}-" +
-                        "[0-9a-f]{12}"
-                )
-                        || orderAccessToken == null
-                        || !orderAccessToken.matches(
-                        "[0-9a-f]{64}"
-                )
+                orderId == null ||
+                !orderId.matches(ORDER_ID_PATTERN) ||
+                orderAccessToken == null ||
+                !orderAccessToken.matches("[0-9a-f]{64}")
         ) {
             postError(
                     callback,
@@ -133,10 +171,7 @@ public final class ShopApi {
             JSONObject body = new JSONObject();
 
             body.put("id", orderId);
-            body.put(
-                    "orderAccessToken",
-                    orderAccessToken
-            );
+            body.put("orderAccessToken", orderAccessToken);
 
             request(
                     "POST",
@@ -151,26 +186,34 @@ public final class ShopApi {
                     new ApiError(
                             0,
                             "Не удалось подготовить " +
-                            "проверку статуса заказа."
+                            "проверку заказа."
                     )
             );
         }
     }
 
+    // -------------------- HTTP --------------------
+
     private void request(
             String method,
-            String endpoint,
+            String route,
             JSONObject body,
             Callback callback
     ) {
-        if (callback == null || closed) {
+        if (callback == null) {
+            throw new IllegalArgumentException(
+                    "Не задан обработчик ответа."
+            );
+        }
+
+        if (closed) {
+            postClosedError(callback);
             return;
         }
 
         /*
          * Создаём снимок тела до запуска фонового потока.
-         * Изменения исходного JSONObject после этого
-         * не изменят отправляемый запрос.
+         * Позднейшие изменения JSONObject не изменят запрос.
          */
         final String payload =
                 body == null ? null : body.toString();
@@ -182,9 +225,7 @@ public final class ShopApi {
                 HttpURLConnection connection = null;
 
                 try {
-                    URL url = new URL(
-                            BASE_URL + endpoint
-                    );
+                    URL url = new URL(BASE_URL + route);
 
                     connection =
                             (HttpURLConnection)
@@ -256,21 +297,17 @@ public final class ShopApi {
 
                     try {
                         data = new JSONObject(response);
-
-                    } catch (Exception invalidJson) {
+                    } catch (Exception error) {
                         /*
-                         * Не считаем неожиданный ответ
-                         * подтверждённым отказом магазина.
-                         * Поэтому statusCode = 0:
-                         * неподтверждённый заказ сохраняется.
+                         * Не очищаем неподтверждённый заказ,
+                         * если ответ нельзя достоверно прочитать.
                          */
                         throw new ApiError(
                                 0,
                                 "Сервер вернул неожиданный ответ. " +
-                                "Если вы отправляли заказ, " +
-                                "его результат пока не подтверждён. " +
-                                "Используйте проверку прежнего " +
-                                "заказа, а не новое оформление."
+                                "Попробуйте позже. Если вы отправляли " +
+                                "заказ, его результат пока " +
+                                "не подтверждён."
                         );
                     }
 
@@ -293,80 +330,37 @@ public final class ShopApi {
                                     0,
                                     "Не удалось получить ответ сервера. " +
                                     "Проверьте интернет. Первый запрос " +
-                                    "после простоя может занять " +
-                                    "около минуты. Если вы отправляли " +
-                                    "заказ, его результат пока " +
-                                    "не подтверждён. Если проверяли " +
-                                    "статус — повторите проверку позже."
+                                    "после простоя может занять около " +
+                                    "минуты. Если вы отправляли заказ, " +
+                                    "его результат пока не подтверждён."
                             )
                     );
 
                 } finally {
                     if (connection != null) {
-                        if (activeConnection == connection) {
-                            activeConnection = null;
-                        }
-
                         connection.disconnect();
+                    }
+
+                    if (activeConnection == connection) {
+                        activeConnection = null;
                     }
                 }
             });
 
         } catch (RejectedExecutionException error) {
-            postError(
-                    callback,
-                    new ApiError(
-                            0,
-                            "Подключение уже закрыто. " +
-                            "Откройте приложение заново."
-                    )
-            );
-        }
-    }
-
-    private String errorMessage(
-            JSONObject data,
-            int status
-    ) {
-        Object value = data.opt("error");
-
-        if (value instanceof String) {
-            String message = ((String) value).trim();
-
-            if (!message.isEmpty()) {
-                return message.length() > 1500
-                        ? message.substring(0, 1500)
-                        : message;
+            if (closed) {
+                postClosedError(callback);
+            } else {
+                postError(
+                        callback,
+                        new ApiError(
+                                0,
+                                "Не удалось начать запрос. " +
+                                "Откройте приложение заново."
+                        )
+                );
             }
         }
-
-        return "Ошибка сервера: " + status;
-    }
-
-    private void postSuccess(
-            Callback callback,
-            JSONObject data
-    ) {
-        if (closed) return;
-
-        main.post(() -> {
-            if (!closed) {
-                callback.onSuccess(data);
-            }
-        });
-    }
-
-    private void postError(
-            Callback callback,
-            ApiError error
-    ) {
-        if (closed) return;
-
-        main.post(() -> {
-            if (!closed) {
-                callback.onError(error);
-            }
-        });
     }
 
     private String readResponse(
@@ -382,8 +376,8 @@ public final class ShopApi {
                         new ByteArrayOutputStream()
         ) {
             byte[] buffer = new byte[8192];
-            int count;
             int total = 0;
+            int count;
 
             while ((count = input.read(buffer)) != -1) {
                 total += count;
@@ -406,9 +400,66 @@ public final class ShopApi {
         }
     }
 
+    private String errorMessage(
+            JSONObject data,
+            int status
+    ) {
+        Object value = data.opt("error");
+
+        if (value instanceof String) {
+            String message =
+                    ((String) value).trim();
+
+            if (!message.isEmpty()) {
+                return message.length() > 1500
+                        ? message.substring(0, 1500)
+                        : message;
+            }
+        }
+
+        return "Ошибка сервера: " + status;
+    }
+
+    private void postSuccess(
+            Callback callback,
+            JSONObject data
+    ) {
+        main.post(() -> {
+            if (!closed) {
+                callback.onSuccess(data);
+            }
+        });
+    }
+
+    private void postError(
+            Callback callback,
+            ApiError error
+    ) {
+        main.post(() -> {
+            if (!closed) {
+                callback.onError(error);
+            }
+        });
+    }
+
+    private void postClosedError(Callback callback) {
+        /*
+         * Отдельно сообщаем о попытке нового запроса
+         * через уже закрытый клиент.
+         */
+        main.post(() -> callback.onError(
+                new ApiError(
+                        0,
+                        "Подключение уже закрыто. " +
+                        "Откройте приложение заново."
+                )
+        ));
+    }
+
+    // -------------------- ЗАКРЫТИЕ --------------------
+
     public void close() {
         closed = true;
-
         worker.shutdownNow();
 
         HttpURLConnection connection =
