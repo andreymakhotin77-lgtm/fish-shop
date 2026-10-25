@@ -41,15 +41,17 @@ jobs:
             android/ProductArtwork.java \
             android/ProductPhoto.java \
             android/PushNotifications.java \
-            android/google-services.json
+            android/OrderPushSubscriptions.java \
+            android/ShopContacts.java \
+            android/BrandLoading.java \
+            android/google-services.json \
+            signing/lavka-release.p12.gpg
           do
             if [ ! -s "$file" ]; then
               echo "::error::Missing or empty file: $file"
               exit 1
             fi
           done
-
-          test -s signing/lavka-release.p12.gpg
 
           python3 - <<'PY'
           import json
@@ -60,13 +62,11 @@ jobs:
           ) as source:
               config = json.load(source)
 
-          clients = config.get("client", [])
-
           package_names = [
               client.get("client_info", {})
                     .get("android_client_info", {})
                     .get("package_name")
-              for client in clients
+              for client in config.get("client", [])
           ]
 
           if "ru.makeevka.fishshop" not in package_names:
@@ -120,6 +120,7 @@ jobs:
           mkdir -p app/src/main/java/ru/makeevka/fishshop
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/values-v31
           mkdir -p app/src/main/res/mipmap-anydpi-v26
 
           cat > settings.gradle <<'EOF'
@@ -175,9 +176,8 @@ jobs:
                   applicationId 'ru.makeevka.fishshop'
                   minSdk 26
                   targetSdk 34
-
                   versionCode 1000 + buildNumber
-                  versionName "0.7-push-test.${buildNumber}"
+                  versionName "0.8-gold-wave.${buildNumber}"
               }
 
               signingConfigs {
@@ -234,7 +234,7 @@ jobs:
                   android:roundIcon="@mipmap/ic_launcher"
                   android:supportsRtl="true"
                   android:usesCleartextTraffic="false"
-                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  android:theme="@style/LavkaTheme">
 
                   <meta-data
                       android:name="com.google.firebase.messaging.default_notification_icon"
@@ -279,6 +279,39 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <color name="notification_gold">#D4AF37</color>
+              <color name="lavka_black">#0E0F11</color>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="LavkaTheme"
+                  parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:windowBackground">@color/lavka_black</item>
+                  <item name="android:statusBarColor">@color/lavka_black</item>
+                  <item name="android:navigationBarColor">@color/lavka_black</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar">false</item>
+                  <item name="android:colorAccent">@color/notification_gold</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values-v31/styles.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="LavkaTheme"
+                  parent="android:style/Theme.Material.Light.NoActionBar">
+                  <item name="android:windowBackground">@color/lavka_black</item>
+                  <item name="android:statusBarColor">@color/lavka_black</item>
+                  <item name="android:navigationBarColor">@color/lavka_black</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar">false</item>
+                  <item name="android:colorAccent">@color/notification_gold</item>
+                  <item name="android:windowSplashScreenBackground">@color/lavka_black</item>
+                  <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_lavka_foreground</item>
+              </style>
           </resources>
           EOF
 
@@ -289,11 +322,9 @@ jobs:
               android:height="24dp"
               android:viewportWidth="24"
               android:viewportHeight="24">
-
               <path
                   android:fillColor="#FFFFFFFF"
                   android:pathData="M3,19 L8,5 L12,5 L16,19 L12,19 L10,10 L7,19 Z M17,5 L21,5 L21,19 L17,19 Z" />
-
           </vector>
           EOF
 
@@ -302,6 +333,120 @@ jobs:
 
           cp android/google-services.json \
             app/google-services.json
+
+      - name: Connect gold wave loading screen
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path(
+              "app/src/main/java/ru/makeevka/fishshop/"
+              "StoreActivity.java"
+          )
+          source = path.read_text(encoding="utf-8")
+
+          if "lavkaBrandLoading" in source:
+              raise SystemExit(
+                  "Loading screen is already connected. "
+                  "Do not apply the same integration twice."
+              )
+
+          changes = [
+              (
+                  "public class StoreActivity extends Activity {",
+                  "public class StoreActivity extends Activity {\n"
+                  "    private BrandLoading lavkaBrandLoading;\n"
+              ),
+              (
+                  "        setContentView(root);\n",
+                  "        setContentView(root);\n"
+                  "        if (state == null || "
+                  "!state.getBoolean("
+                  "\"lavka_loading_finished\", false)) {\n"
+                  "            lavkaBrandLoading = new BrandLoading("
+                  "this, this::loadCatalog);\n"
+                  "        }\n"
+              ),
+              (
+                  "    private void render(boolean keepPosition) {\n"
+                  "        if (destroyed) return;\n",
+                  "    private void render(boolean keepPosition) {\n"
+                  "        if (destroyed) return;\n"
+                  "        if (lavkaBrandLoading != null) {\n"
+                  "            lavkaBrandLoading.update("
+                  "loadingCatalog, freshCatalog);\n"
+                  "        }\n"
+              ),
+              (
+                  "    private void message(String title, String body) {\n"
+                  "        if (destroyed || isFinishing()) return;\n",
+                  "    private void message(String title, String body) {\n"
+                  "        if (destroyed || isFinishing()) return;\n"
+                  "        if (lavkaBrandLoading != null &&\n"
+                  "                lavkaBrandLoading.isBlocking() &&\n"
+                  "                \"Каталог\".equals(title)) {\n"
+                  "            lavkaBrandLoading.showError(body);\n"
+                  "            return;\n"
+                  "        }\n"
+              ),
+              (
+                  "    protected void onDestroy() {\n",
+                  "    protected void onDestroy() {\n"
+                  "        if (lavkaBrandLoading != null) {\n"
+                  "            lavkaBrandLoading.dispose();\n"
+                  "        }\n"
+              ),
+          ]
+
+          for old, new in changes:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      "StoreActivity structure differs from expected. "
+                      "Integration stopped safely. "
+                      "Unmatched fragment: " + old.splitlines()[0]
+                  )
+              source = source.replace(old, new, 1)
+
+          if "onSaveInstanceState(" in source:
+              raise SystemExit(
+                  "Existing state-saving method detected. "
+                  "Integration requires review."
+              )
+
+          state_method = '''
+              @Override
+              protected void onSaveInstanceState(Bundle outState) {
+                  outState.putBoolean(
+                          "lavka_loading_finished",
+                          lavkaBrandLoading == null ||
+                          lavkaBrandLoading.isFinished()
+                  );
+                  super.onSaveInstanceState(outState);
+              }
+
+          '''
+
+          marker = "    @Override\n    protected void onDestroy() {"
+
+          if source.count(marker) != 1:
+              raise SystemExit(
+                  "Cannot locate lifecycle insertion point."
+              )
+
+          source = source.replace(
+              marker, state_method + marker, 1
+          )
+
+          path.write_text(source, encoding="utf-8")
+          print(
+              "Gold wave connected to build copy. "
+              "Repository source remains unchanged."
+          )
+          PY
 
       - name: Create black and gold icon
         shell: bash
