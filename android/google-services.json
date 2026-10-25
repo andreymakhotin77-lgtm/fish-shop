@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "105689651513",
+    "project_id": "lavka-vkusa-ee338",
+    "storage_bucket": "lavka-vkusa-ee338.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:105689651513:android:ecd78dc061dba61d1e30e8",
+        "android_client_info": {
+          "package_name": "ru.makeevka.fishshop"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB5vNeDvaAlbKvcXIKgWtsNgxCLDMTnQyY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
