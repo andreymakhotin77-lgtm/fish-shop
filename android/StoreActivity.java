@@ -32,6 +32,10 @@ import java.time.LocalTime;
 import java.util.*;
 
 public class StoreActivity extends Activity {
+    private Button comfortCartButton;
+    private Button comfortCitySelector;
+    private CheckBox comfortAgreement;
+
 
     private final int BLACK = Color.rgb(14, 15, 17);
     private final int CARD = Color.rgb(25, 27, 30);
@@ -228,6 +232,17 @@ public class StoreActivity extends Activity {
         root.addView(
                 separator, new LinearLayout.LayoutParams(-1, dp(1))
         );
+
+        comfortCartButton = ShopComfort.cartButton(
+                this, () -> openTab(3)
+        );
+
+        LinearLayout.LayoutParams comfortParams =
+                new LinearLayout.LayoutParams(-1, dp(52));
+        comfortParams.setMargins(
+                dp(16), dp(8), dp(16), dp(8)
+        );
+        root.addView(comfortCartButton, comfortParams);
 
         navigation = new LinearLayout(this);
         navigation.setBackgroundColor(CARD);
@@ -575,8 +590,51 @@ public class StoreActivity extends Activity {
         }
     }
 
+    private boolean comfortShowFieldError(
+            String title, String explanation
+    ) {
+        TextView target;
+
+        switch (title) {
+            case "Имя":
+                target = nameInput;
+                break;
+
+            case "Телефон":
+                target = phoneInput;
+                break;
+
+            case "Город":
+                target = comfortCitySelector;
+                break;
+
+            case "Название города":
+                target = otherCityInput;
+                break;
+
+            case "Адрес":
+                target = addressInput;
+                break;
+
+            case "Комментарий":
+                target = commentInput;
+                break;
+
+            case "Согласие":
+                target = comfortAgreement;
+                break;
+
+            default:
+                return false;
+        }
+
+        return ShopComfort.markError(target, explanation);
+    }
+
+
     private void message(String title, String body) {
         if (destroyed || isFinishing()) return;
+        if (tab == 3 && comfortShowFieldError(title, body)) return;
         AlertDialog dialog = dialogBuilder()
                 .setTitle(title)
                 .setMessage(body)
@@ -828,12 +886,22 @@ public class StoreActivity extends Activity {
         addressInput = null;
         commentInput = null;
         otherCityInput = null;
+        comfortCitySelector = null;
+        comfortAgreement = null;
 
         content.removeAllViews();
         navigation.removeAllViews();
 
         header();
         drawNavigation();
+        ShopComfort.updateCart(
+                comfortCartButton,
+                tab != 3 && (!cart.isEmpty() || pending != null),
+                freshCatalog && !loadingCatalog,
+                cart.size(),
+                money(total()),
+                pending != null
+        );
 
         if (loadingCatalog) {
             content.addView(text(
@@ -1792,6 +1860,7 @@ public class StoreActivity extends Activity {
                     decorate(dialog);
                 }
         );
+        comfortCitySelector = selector;
         selector.setEnabled(!busyCart());
         parent.addView(selector);
 
@@ -1819,6 +1888,7 @@ public class StoreActivity extends Activity {
                 parent, "Телефон: +7…", customerPhone,
                 InputType.TYPE_CLASS_PHONE, 32
         );
+        ShopComfort.attachPhone(phoneInput);
 
         if (!order) {
             cityFields(parent);
@@ -1872,6 +1942,7 @@ public class StoreActivity extends Activity {
         );
 
         CheckBox agreement = new CheckBox(this);
+        comfortAgreement = agreement;
         agreement.setText(
                 "Согласен на передачу имени, телефона и адреса " +
                 "магазину для обработки этого заказа."
