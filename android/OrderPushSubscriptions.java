@@ -44,7 +44,8 @@ public final class OrderPushSubscriptions {
 
     private final Context context;
     private final SharedPreferences historyPrefs;
-    private final SharedPreferences pushPrefs;
+        private SharedPreferences pushPrefs;
+
     private final ShopApi api = new ShopApi();
 
     private final Handler main =
