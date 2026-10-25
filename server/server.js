@@ -6,13 +6,39 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { Pool } = require("pg");
 
+// Настройки сервера.
 const PORT = Number(process.env.PORT || 3000);
+
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID || "";
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || "";
 
+// Ключи Cloudinary берутся только из настроек Render.
+const CLOUD_NAME = (
+  process.env.CLOUDINARY_CLOUD_NAME || ""
+).trim();
+
+const CLOUD_API_KEY = (
+  process.env.CLOUDINARY_API_KEY || ""
+).trim();
+
+const CLOUD_API_SECRET = (
+  process.env.CLOUDINARY_API_SECRET || ""
+).trim();
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_UPLOAD_BODY_BYTES = 7 * 1024 * 1024 + 16384;
+
 const PICKUP =
   "г. Макеевка, ул. Плеханова, 1в, магазин «Лавка Вкуса»";
+
+function cloudinaryConfigured() {
+  return Boolean(
+    /^[a-z0-9_-]+$/i.test(CLOUD_NAME) &&
+    CLOUD_API_KEY &&
+    CLOUD_API_SECRET
+  );
+}
 
 if (!process.env.DATABASE_URL) {
   console.error("Не задана переменная DATABASE_URL.");
@@ -34,7 +60,8 @@ function json(res, status, data) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff"
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer"
   });
 
   res.end(JSON.stringify(data));
@@ -46,30 +73,76 @@ function fail(status, message) {
   return error;
 }
 
-async function readJson(req) {
-  const type = String(req.headers["content-type"] || "");
+// Обычные запросы имеют небольшой лимит.
+// Для фото отдельный маршрут разрешает более крупное тело.
+async function readJson(req, maxBytes = 32768) {
+  const type = String(
+    req.headers["content-type"] || ""
+  ).toLowerCase();
 
-  if (!type.toLowerCase().startsWith("application/json")) {
+  if (type.split(";")[0].trim() !== "application/json") {
+    req.resume();
     throw fail(415, "Ожидается JSON.");
   }
 
-  const chunks = [];
-  let size = 0;
+  const declaredLength = Number(
+    req.headers["content-length"] || 0
+  );
 
-  for await (const chunk of req) {
-    size += chunk.length;
-
-    if (size > 32768) {
-      throw fail(413, "Слишком большой запрос.");
-    }
-
-    chunks.push(chunk);
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > maxBytes
+  ) {
+    req.resume();
+    throw fail(413, "Слишком большой запрос.");
   }
 
+  const raw = await new Promise((resolve, reject) => {
+    let chunks = [];
+    let size = 0;
+    let settled = false;
+
+    function stop(error) {
+      if (settled) return;
+
+      settled = true;
+      chunks = [];
+      reject(error);
+    }
+
+    req.on("data", (chunk) => {
+      if (settled) return;
+
+      size += chunk.length;
+
+      if (size > maxBytes) {
+        stop(fail(413, "Слишком большой запрос."));
+        return;
+      }
+
+      chunks.push(chunk);
+    });
+
+    req.on("end", () => {
+      if (settled) return;
+
+      settled = true;
+      const buffer = Buffer.concat(chunks);
+      chunks = [];
+      resolve(buffer);
+    });
+
+    req.on("aborted", () => {
+      stop(fail(400, "Загрузка запроса прервана."));
+    });
+
+    req.on("error", () => {
+      stop(fail(400, "Не удалось прочитать запрос."));
+    });
+  });
+
   try {
-    const data = JSON.parse(
-      Buffer.concat(chunks).toString("utf8")
-    );
+    const data = JSON.parse(raw.toString("utf8"));
 
     if (
       !data ||
@@ -95,7 +168,10 @@ function checkAdmin(req) {
     throw fail(503, "Доступ продавца ещё не настроен.");
   }
 
-  const supplied = String(req.headers.authorization || "");
+  const supplied = String(
+    req.headers.authorization || ""
+  );
+
   const expected = `Bearer ${ADMIN_TOKEN}`;
 
   const a = crypto
@@ -189,8 +265,6 @@ async function initializeDatabase() {
       )
     `);
 
-    // Постоянные короткие номера заказов.
-    // При повторных запусках нумерация не сбрасывается.
     await client.query(`
       ALTER TABLE lv_orders
       ADD COLUMN IF NOT EXISTS order_number BIGINT
@@ -233,7 +307,10 @@ async function initializeDatabase() {
 }
 
 function normalizeOrder(data) {
-  const requestId = text(data.requestId, 80).toLowerCase();
+  const requestId = text(
+    data.requestId,
+    80
+  ).toLowerCase();
 
   const uuidPattern =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -331,8 +408,6 @@ async function saveOrder(order) {
   try {
     await client.query("BEGIN");
 
-    // Одновременные повторы одного заказа
-    // обрабатываются по очереди.
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtext($1))",
       [order.requestId]
@@ -385,7 +460,9 @@ async function saveOrder(order) {
         );
       }
 
-      const lineTotal = product.price_rub * item.quantity;
+      const lineTotal =
+        product.price_rub * item.quantity;
+
       totalRub += lineTotal;
 
       return {
@@ -405,8 +482,6 @@ async function saveOrder(order) {
       throw fail(400, "Слишком большая сумма заказа.");
     }
 
-    // Технический идентификатор остаётся внутри системы.
-    // Короткий order_number назначает PostgreSQL.
     const id = `LV-${crypto.randomUUID()}`;
 
     const result = await client.query(
@@ -514,16 +589,12 @@ async function notifyTelegram(row) {
         const body = await response.json();
 
         if (!response.ok || !body.ok) {
-          throw new Error(
-            "Telegram did not confirm delivery"
-          );
+          throw new Error("Telegram did not confirm delivery");
         }
       }
 
       notificationStatus = "sent";
     } catch {
-      // Заказ уже сохранён в базе.
-      // Сбой Telegram не создаёт второй заказ.
       notificationStatus = "unconfirmed";
 
       console.error(
@@ -601,23 +672,24 @@ function normalizeProduct(data, id) {
     sortOrder < -100000 ||
     sortOrder > 100000
   ) {
-    throw fail(
-      400,
-      "Некорректный порядок сортировки."
-    );
+    throw fail(400, "Некорректный порядок сортировки.");
   }
 
   if (imageUrl) {
     try {
       const url = new URL(imageUrl);
 
-      if (url.protocol !== "https:") {
+      if (
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password
+      ) {
         throw new Error();
       }
     } catch {
       throw fail(
         400,
-        "Ссылка на фото должна начинаться с https://"
+        "Укажите обычную HTTPS-ссылку на фотографию."
       );
     }
   }
@@ -635,8 +707,7 @@ function normalizeProduct(data, id) {
   };
 }
 
-// Общий ограничитель нагрузки тестовой версии.
-// Перед публичной рекламой нужен также лимит на уровне прокси.
+// Общий ограничитель запросов записи.
 let limitStarted = Date.now();
 let writeRequests = 0;
 
@@ -660,6 +731,245 @@ function limitWrites(req) {
   }
 }
 
+// Дополнительные ограничения загрузки фотографий.
+// Работают после проверки ключа продавца.
+let uploadLimitStarted = Date.now();
+let uploadRequests = 0;
+let activeUploads = 0;
+
+function limitImageUploads() {
+  if (Date.now() - uploadLimitStarted > 60000) {
+    uploadLimitStarted = Date.now();
+    uploadRequests = 0;
+  }
+
+  uploadRequests += 1;
+
+  if (uploadRequests > 10) {
+    throw fail(
+      429,
+      "Можно загрузить до 10 фотографий за минуту. " +
+      "Подождите немного."
+    );
+  }
+
+  if (activeUploads >= 2) {
+    throw fail(
+      503,
+      "Другие фотографии ещё загружаются. " +
+      "Попробуйте чуть позже."
+    );
+  }
+}
+
+function decodeImage(data) {
+  const mimeType = data.mimeType;
+  const base64 = data.base64;
+
+  const allowed = [
+    "image/jpeg",
+    "image/png",
+    "image/webp"
+  ];
+
+  if (!allowed.includes(mimeType)) {
+    throw fail(
+      400,
+      "Поддерживаются фотографии JPG, PNG и WEBP."
+    );
+  }
+
+  if (
+    typeof base64 !== "string" ||
+    base64.length < 4 ||
+    base64.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 ||
+    base64.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)
+  ) {
+    throw fail(
+      400,
+      "Некорректная фотография или размер больше 5 МБ."
+    );
+  }
+
+  const buffer = Buffer.from(base64, "base64");
+
+  if (
+    buffer.length < 12 ||
+    buffer.length > MAX_IMAGE_BYTES ||
+    buffer.toString("base64") !== base64
+  ) {
+    throw fail(
+      400,
+      "Некорректная фотография или размер больше 5 МБ."
+    );
+  }
+
+  const isJpeg =
+    buffer[0] === 0xff &&
+    buffer[1] === 0xd8 &&
+    buffer[2] === 0xff;
+
+  const isPng = buffer.subarray(0, 8).equals(
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
+  );
+
+  const isWebp =
+    buffer.toString("ascii", 0, 4) === "RIFF" &&
+    buffer.toString("ascii", 8, 12) === "WEBP";
+
+  const correctType =
+    (mimeType === "image/jpeg" && isJpeg) ||
+    (mimeType === "image/png" && isPng) ||
+    (mimeType === "image/webp" && isWebp);
+
+  if (!correctType) {
+    throw fail(
+      400,
+      "Содержимое файла не соответствует формату фотографии."
+    );
+  }
+
+  return {
+    buffer,
+    mimeType
+  };
+}
+
+async function uploadImageToCloudinary(image) {
+  if (!cloudinaryConfigured()) {
+    throw fail(
+      503,
+      "Хранилище фото не настроено. " +
+      "Проверьте переменные Cloudinary в Render."
+    );
+  }
+
+  const extension = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp"
+  }[image.mimeType];
+
+  // Подпись создаётся на сервере.
+  // Секретный ключ не передаётся в браузер.
+  const parameters = {
+    folder: "lavka-vkusa/products",
+    public_id: crypto.randomUUID(),
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    transformation: "c_limit,w_1200,h_1200/q_auto:good/f_jpg"
+  };
+
+  const signatureSource = Object.keys(parameters)
+    .sort()
+    .map((key) => `${key}=${parameters[key]}`)
+    .join("&");
+
+  const signature = crypto
+    .createHash("sha1")
+    .update(signatureSource + CLOUD_API_SECRET)
+    .digest("hex");
+
+  const form = new FormData();
+
+  for (const [key, value] of Object.entries(parameters)) {
+    form.append(key, value);
+  }
+
+  form.append("api_key", CLOUD_API_KEY);
+  form.append("signature", signature);
+
+  form.append(
+    "file",
+    new Blob(
+      [image.buffer],
+      { type: image.mimeType }
+    ),
+    `product.${extension}`
+  );
+
+  let response;
+  let result;
+
+  try {
+    response = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+      {
+        method: "POST",
+        body: form,
+        redirect: "error",
+        signal: AbortSignal.timeout(45000)
+      }
+    );
+
+    result = await response.json();
+  } catch {
+    throw fail(
+      502,
+      "Нет подтверждения от хранилища фотографий. " +
+      "Проверьте соединение и попробуйте позже."
+    );
+  }
+
+  if (!response.ok || !result.secure_url) {
+    if (
+      response.status === 401 ||
+      response.status === 403
+    ) {
+      throw fail(
+        502,
+        "Cloudinary отклонил доступ. Проверьте Cloud name, " +
+        "API Key и API Secret. Ключ и секрет должны " +
+        "быть из одной строки."
+      );
+    }
+
+    if (response.status === 429) {
+      throw fail(
+        502,
+        "Хранилище временно ограничило загрузку. " +
+        "Проверьте лимиты Cloudinary и попробуйте позже."
+      );
+    }
+
+    throw fail(
+      502,
+      "Хранилище не приняло фотографию. " +
+      "Попробуйте обычный снимок JPG или PNG. " +
+      "Если ошибка повторяется, проверьте настройки " +
+      "и доступные лимиты Cloudinary."
+    );
+  }
+
+  let imageUrl;
+
+  try {
+    imageUrl = new URL(result.secure_url);
+
+    if (
+      imageUrl.protocol !== "https:" ||
+      imageUrl.hostname !== "res.cloudinary.com" ||
+      !imageUrl.pathname.startsWith(`/${CLOUD_NAME}/`) ||
+      result.resource_type !== "image" ||
+      result.format !== "jpg"
+    ) {
+      throw new Error();
+    }
+  } catch {
+    throw fail(
+      502,
+      "Хранилище вернуло неожиданный адрес фотографии."
+    );
+  }
+
+  return {
+    imageUrl: imageUrl.href,
+    width: result.width,
+    height: result.height,
+    bytes: result.bytes
+  };
+}
+
 async function handle(req, res) {
   limitWrites(req);
 
@@ -678,7 +988,8 @@ async function handle(req, res) {
       databaseConnected: true,
       telegramConfigured: Boolean(BOT_TOKEN && CHAT_ID),
       adminConfigured: ADMIN_TOKEN.length >= 32,
-      orderNumbersEnabled: true
+      orderNumbersEnabled: true,
+      imageUploadConfigured: cloudinaryConfigured()
     });
   }
 
@@ -765,6 +1076,58 @@ async function handle(req, res) {
 
   if (pathname.startsWith("/api/admin/")) {
     checkAdmin(req);
+
+    // Информация для новой панели продавца.
+    if (
+      req.method === "GET" &&
+      pathname === "/api/admin/config"
+    ) {
+      return json(res, 200, {
+        imageUploadConfigured: cloudinaryConfigured(),
+        maxImageBytes: MAX_IMAGE_BYTES,
+        allowedImageTypes: [
+          "image/jpeg",
+          "image/png",
+          "image/webp"
+        ]
+      });
+    }
+
+    // Загрузка доступна только с ключом продавца.
+    if (
+      req.method === "POST" &&
+      pathname === "/api/admin/images"
+    ) {
+      if (!cloudinaryConfigured()) {
+        throw fail(
+          503,
+          "Хранилище фото ещё не настроено."
+        );
+      }
+
+      limitImageUploads();
+      activeUploads += 1;
+
+      try {
+        const data = await readJson(
+          req,
+          MAX_UPLOAD_BODY_BYTES
+        );
+
+        const image = decodeImage(data);
+        const uploaded = await uploadImageToCloudinary(image);
+
+        return json(res, 201, {
+          ok: true,
+          ...uploaded,
+          message:
+            "Фотография загружена. " +
+            "Сохраните товар, чтобы привязать её к каталогу."
+        });
+      } finally {
+        activeUploads -= 1;
+      }
+    }
 
     if (
       req.method === "GET" &&
@@ -928,10 +1291,7 @@ async function handle(req, res) {
       ];
 
       if (!allowed.includes(data.status)) {
-        throw fail(
-          400,
-          "Некорректный статус заказа."
-        );
+        throw fail(400, "Некорректный статус заказа.");
       }
 
       const result = await pool.query(
@@ -982,7 +1342,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.requestTimeout = 30000;
+server.requestTimeout = 90000;
 server.headersTimeout = 15000;
 server.keepAliveTimeout = 5000;
 
@@ -992,6 +1352,12 @@ initializeDatabase()
       console.log("Сервер Лавки Вкуса запущен.");
       console.log("База данных подключена.");
       console.log("Короткие номера заказов включены.");
+
+      console.log(
+        cloudinaryConfigured()
+          ? "Переменные хранилища фотографий заданы."
+          : "Хранилище фотографий пока не настроено."
+      );
     });
   })
   .catch((error) => {
@@ -1008,7 +1374,10 @@ process.on("SIGTERM", () => {
     pool.end().finally(() => process.exit(0));
   });
 
-  setTimeout(() => process.exit(1), 10000).unref();
+  setTimeout(
+    () => process.exit(1),
+    10000
+  ).unref();
 });
 
 // КОНЕЦ ФАЙЛА
