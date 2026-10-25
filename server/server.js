@@ -6,6 +6,8 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { Pool } = require("pg");
 
+// -------------------- НАСТРОЙКИ --------------------
+
 const PORT = Number(process.env.PORT || 3000);
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
@@ -21,11 +23,11 @@ const CLOUD_API_KEY =
 const CLOUD_API_SECRET =
   (process.env.CLOUDINARY_API_SECRET || "").trim();
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const MAX_UPLOAD_BODY_BYTES = 7 * 1024 * 1024 + 16384;
-
 const PICKUP =
   "г. Макеевка, ул. Плеханова, 1в, магазин «Лавка Вкуса»";
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_UPLOAD_BODY_BYTES = 7 * 1024 * 1024 + 16384;
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -33,17 +35,8 @@ const UUID_PATTERN =
 const ORDER_ID_PATTERN =
   /^LV-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-const ACCESS_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
-
-const ORDER_STATUSES = [
-  "new",
-  "confirmed",
-  "preparing",
-  "delivering",
-  "ready",
-  "completed",
-  "cancelled"
-];
+const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
+const PRODUCT_ID_PATTERN = /^[a-z0-9_-]{1,80}$/;
 
 const STATUS_NAMES = {
   new: "Новый",
@@ -54,6 +47,78 @@ const STATUS_NAMES = {
   completed: "Выполнен",
   cancelled: "Отменён"
 };
+
+const ORDER_STATUSES = Object.keys(STATUS_NAMES);
+
+if (!process.env.DATABASE_URL) {
+  console.error("Не задана переменная DATABASE_URL.");
+  process.exit(1);
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 5,
+  connectionTimeoutMillis: 15000,
+  idleTimeoutMillis: 30000
+});
+
+pool.on("error", () => {
+  console.error("Ошибка фонового подключения к базе данных.");
+});
+
+// -------------------- ОБЩИЕ ФУНКЦИИ --------------------
+
+function fail(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function json(res, status, data) {
+  if (res.destroyed || res.writableEnded) return;
+
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer"
+  });
+
+  res.end(JSON.stringify(data));
+}
+
+function text(value, max) {
+  return typeof value === "string"
+    ? value.trim().slice(0, max)
+    : "";
+}
+
+function sha256(value) {
+  return crypto
+    .createHash("sha256")
+    .update(value)
+    .digest("hex");
+}
+
+function sameHash(first, second) {
+  if (
+    typeof first !== "string" ||
+    typeof second !== "string" ||
+    !TOKEN_PATTERN.test(first) ||
+    !TOKEN_PATTERN.test(second)
+  ) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(first, "hex"),
+    Buffer.from(second, "hex")
+  );
+}
+
+function isKilogram(unit) {
+  return String(unit || "").trim().toLowerCase() === "кг";
+}
 
 const moneyFormatter = new Intl.NumberFormat("ru-RU", {
   minimumFractionDigits: 0,
@@ -72,45 +137,27 @@ function cloudinaryConfigured() {
   );
 }
 
-if (!process.env.DATABASE_URL) {
-  console.error("Не задана переменная DATABASE_URL.");
-  process.exit(1);
-}
+function checkAdmin(req) {
+  if (ADMIN_TOKEN.length < 32) {
+    throw fail(503, "Доступ продавца ещё не настроен.");
+  }
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: 5,
-  connectionTimeoutMillis: 15000,
-  idleTimeoutMillis: 30000
-});
+  const received = String(req.headers.authorization || "");
+  const expected = `Bearer ${ADMIN_TOKEN}`;
 
-pool.on("error", () => {
-  console.error("Ошибка фонового подключения к базе данных.");
-});
-
-function json(res, status, data) {
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer"
-  });
-
-  res.end(JSON.stringify(data));
-}
-
-function fail(status, message) {
-  const error = new Error(message);
-  error.status = status;
-  return error;
+  if (!sameHash(sha256(received), sha256(expected))) {
+    throw fail(401, "Неверный ключ доступа продавца.");
+  }
 }
 
 async function readJson(req, maxBytes = 32768) {
-  const type = String(
+  const contentType = String(
     req.headers["content-type"] || ""
   ).toLowerCase();
 
-  if (type.split(";")[0].trim() !== "application/json") {
+  if (
+    contentType.split(";")[0].trim() !== "application/json"
+  ) {
     req.resume();
     throw fail(415, "Ожидается JSON.");
   }
@@ -127,25 +174,25 @@ async function readJson(req, maxBytes = 32768) {
     throw fail(413, "Слишком большой запрос.");
   }
 
-  const raw = await new Promise((resolve, reject) => {
+  const buffer = await new Promise((resolve, reject) => {
     let chunks = [];
     let size = 0;
-    let settled = false;
+    let finished = false;
 
-    function stop(error) {
-      if (settled) return;
-      settled = true;
+    function rejectOnce(error) {
+      if (finished) return;
+      finished = true;
       chunks = [];
       reject(error);
     }
 
     req.on("data", (chunk) => {
-      if (settled) return;
+      if (finished) return;
 
       size += chunk.length;
 
       if (size > maxBytes) {
-        stop(fail(413, "Слишком большой запрос."));
+        rejectOnce(fail(413, "Слишком большой запрос."));
         return;
       }
 
@@ -153,25 +200,24 @@ async function readJson(req, maxBytes = 32768) {
     });
 
     req.on("end", () => {
-      if (settled) return;
-      settled = true;
-
-      const buffer = Buffer.concat(chunks);
+      if (finished) return;
+      finished = true;
+      const result = Buffer.concat(chunks);
       chunks = [];
-      resolve(buffer);
+      resolve(result);
     });
 
     req.on("aborted", () => {
-      stop(fail(400, "Загрузка запроса прервана."));
+      rejectOnce(fail(400, "Загрузка запроса прервана."));
     });
 
     req.on("error", () => {
-      stop(fail(400, "Не удалось прочитать запрос."));
+      rejectOnce(fail(400, "Не удалось прочитать запрос."));
     });
   });
 
   try {
-    const data = JSON.parse(raw.toString("utf8"));
+    const data = JSON.parse(buffer.toString("utf8"));
 
     if (
       !data ||
@@ -187,62 +233,93 @@ async function readJson(req, maxBytes = 32768) {
   }
 }
 
-function text(value, max) {
-  if (typeof value !== "string") return "";
-  return value.trim().slice(0, max);
-}
+// -------------------- ОГРАНИЧЕНИЯ ЗАПРОСОВ --------------------
 
-function sha256(value) {
-  return crypto
-    .createHash("sha256")
-    .update(value)
-    .digest("hex");
-}
+// Лимиты действуют в пределах одного запущенного сервера.
+let writesStarted = Date.now();
+let writeCount = 0;
 
-function sameHash(first, second) {
+function limitWrites(req) {
   if (
-    typeof first !== "string" ||
-    typeof second !== "string" ||
-    !ACCESS_TOKEN_PATTERN.test(first) ||
-    !ACCESS_TOKEN_PATTERN.test(second)
+    !["POST", "PUT", "PATCH", "DELETE"].includes(req.method)
   ) {
-    return false;
+    return;
   }
 
-  return crypto.timingSafeEqual(
-    Buffer.from(first, "hex"),
-    Buffer.from(second, "hex")
-  );
-}
-
-function checkAdmin(req) {
-  if (ADMIN_TOKEN.length < 32) {
-    throw fail(503, "Доступ продавца ещё не настроен.");
+  if (Date.now() - writesStarted >= 60000) {
+    writesStarted = Date.now();
+    writeCount = 0;
   }
 
-  const supplied = String(
-    req.headers.authorization || ""
-  );
+  writeCount += 1;
 
-  const expected = `Bearer ${ADMIN_TOKEN}`;
-
-  if (!sameHash(sha256(supplied), sha256(expected))) {
-    throw fail(401, "Неверный ключ доступа продавца.");
+  if (writeCount > 120) {
+    throw fail(
+      429,
+      "Слишком много запросов. Попробуйте через минуту."
+    );
   }
 }
 
-function isKilogram(unit) {
-  return String(unit || "").trim().toLowerCase() === "кг";
+let uploadsStarted = Date.now();
+let uploadCount = 0;
+let activeUploads = 0;
+
+function limitUploads() {
+  if (Date.now() - uploadsStarted >= 60000) {
+    uploadsStarted = Date.now();
+    uploadCount = 0;
+  }
+
+  uploadCount += 1;
+
+  if (uploadCount > 10) {
+    throw fail(
+      429,
+      "Можно загрузить до 10 фотографий за минуту."
+    );
+  }
+
+  if (activeUploads >= 2) {
+    throw fail(
+      503,
+      "Другие фотографии ещё загружаются. Подождите немного."
+    );
+  }
 }
+
+// -------------------- ПРЕДСТАВЛЕНИЕ ДАННЫХ --------------------
 
 function productView(row) {
+  const priceRub = Number(row.price_rub);
+
+  const candidate =
+    row.old_price_rub === null ||
+    row.old_price_rub === undefined
+      ? null
+      : Number(row.old_price_rub);
+
+  const isPromotion =
+    Number.isInteger(candidate) && candidate > priceRub;
+
+  const oldPriceRub = isPromotion ? candidate : null;
+
+  const discountPercent = isPromotion
+    ? Math.floor(
+        ((oldPriceRub - priceRub) * 100) / oldPriceRub
+      )
+    : 0;
+
   return {
     id: row.id,
     name: row.name,
     category: row.category,
     description: row.description,
-    priceRub: row.price_rub,
-    price: row.price_rub,
+    priceRub,
+    price: priceRub,
+    oldPriceRub,
+    isPromotion,
+    discountPercent,
     unit: row.unit,
     pack: `1 ${row.unit}`,
     imageUrl: row.image_url,
@@ -254,7 +331,6 @@ function productView(row) {
   };
 }
 
-// Полные сведения доступны только продавцу.
 function orderView(row) {
   return {
     id: row.id,
@@ -274,10 +350,6 @@ function orderView(row) {
   };
 }
 
-// Покупатель получает только сведения,
-// необходимые для истории и проверки статуса.
-// Имя, телефон, адрес, requestId и хеш ключа
-// этот ответ не содержит.
 function customerOrderView(row) {
   return {
     id: row.id,
@@ -290,16 +362,24 @@ function customerOrderView(row) {
     items: row.items,
     totalRub: Number(row.total_rub),
     status: row.status,
-    statusName: STATUS_NAMES[row.status] || "Статус уточняется",
+    statusName:
+      STATUS_NAMES[row.status] || "Статус уточняется",
     payment: "on_receipt"
   };
 }
+
+// -------------------- ПОДГОТОВКА БАЗЫ --------------------
 
 async function initializeDatabase() {
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
+
+    // Не допускаем одновременного выполнения миграций.
+    await client.query(
+      "SELECT pg_advisory_xact_lock(781240193)"
+    );
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS lv_products (
@@ -314,6 +394,34 @@ async function initializeDatabase() {
         sort_order INTEGER NOT NULL DEFAULT 0,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
+    `);
+
+    await client.query(`
+      ALTER TABLE lv_products
+      ADD COLUMN IF NOT EXISTS old_price_rub INTEGER
+    `);
+
+    await client.query(`
+      DO $migration$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conrelid = 'lv_products'::regclass
+            AND conname = 'lv_products_old_price_check'
+        ) THEN
+          ALTER TABLE lv_products
+          ADD CONSTRAINT lv_products_old_price_check
+          CHECK (
+            old_price_rub IS NULL
+            OR (
+              old_price_rub > price_rub
+              AND old_price_rub <= 1000000
+            )
+          );
+        END IF;
+      END
+      $migration$;
     `);
 
     await client.query(`
@@ -337,7 +445,7 @@ async function initializeDatabase() {
       )
     `);
 
-    const column = await client.query(`
+    const totalColumn = await client.query(`
       SELECT data_type
       FROM information_schema.columns
       WHERE table_schema = current_schema()
@@ -346,8 +454,8 @@ async function initializeDatabase() {
     `);
 
     if (
-      column.rows.length &&
-      column.rows[0].data_type !== "numeric"
+      totalColumn.rows.length &&
+      totalColumn.rows[0].data_type !== "numeric"
     ) {
       await client.query(`
         ALTER TABLE lv_orders
@@ -362,9 +470,6 @@ async function initializeDatabase() {
       GENERATED ALWAYS AS IDENTITY (START WITH 1001)
     `);
 
-    // У старых заказов остаётся NULL.
-    // Ключи доступа к старым заказам автоматически
-    // не назначаются.
     await client.query(`
       ALTER TABLE lv_orders
       ADD COLUMN IF NOT EXISTS tracking_token_hash TEXT
@@ -405,22 +510,254 @@ async function initializeDatabase() {
   }
 }
 
-// Новое приложение должно создавать 32 случайных байта
-// и передавать их как 64 шестнадцатеричных символа
-// в поле orderAccessToken.
-// Старое приложение может не передавать это поле.
+// -------------------- ТОВАРЫ И АКЦИИ --------------------
+
+function normalizeProduct(data, id) {
+  const name = text(data.name, 120);
+  const category =
+    text(data.category, 80) || "Рыба и морепродукты";
+
+  const description = text(data.description, 2000);
+  const unit = text(data.unit, 20) || "кг";
+  const imageUrl = text(data.imageUrl, 1500);
+  const priceRub = data.priceRub;
+
+  const available =
+    data.available === undefined ? true : data.available;
+
+  const sortOrder =
+    data.sortOrder === undefined ? 0 : data.sortOrder;
+
+  const oldPriceProvided =
+    Object.prototype.hasOwnProperty.call(
+      data,
+      "oldPriceRub"
+    );
+
+  let oldPriceRub = null;
+
+  if (
+    oldPriceProvided &&
+    data.oldPriceRub !== null &&
+    data.oldPriceRub !== ""
+  ) {
+    oldPriceRub = data.oldPriceRub;
+
+    if (
+      !Number.isInteger(oldPriceRub) ||
+      oldPriceRub < 1 ||
+      oldPriceRub > 1000000
+    ) {
+      throw fail(
+        400,
+        "Старая цена должна быть целым числом " +
+        "от 1 до 1000000 или оставаться пустой."
+      );
+    }
+  }
+
+  if (!PRODUCT_ID_PATTERN.test(id)) {
+    throw fail(400, "Некорректный код товара.");
+  }
+
+  if (name.length < 2) {
+    throw fail(400, "Укажите название товара.");
+  }
+
+  if (
+    !Number.isInteger(priceRub) ||
+    priceRub < 1 ||
+    priceRub > 1000000
+  ) {
+    throw fail(
+      400,
+      "Цена должна быть целым числом от 1 до 1000000."
+    );
+  }
+
+  if (
+    oldPriceRub !== null &&
+    oldPriceRub <= priceRub
+  ) {
+    throw fail(
+      400,
+      "Старая цена должна быть выше текущей. " +
+      "Чтобы убрать акцию, очистите старую цену."
+    );
+  }
+
+  if (!["кг", "шт", "уп"].includes(unit)) {
+    throw fail(400, "Выберите единицу: кг, шт или уп.");
+  }
+
+  if (typeof available !== "boolean") {
+    throw fail(400, "Некорректное значение наличия.");
+  }
+
+  if (
+    !Number.isInteger(sortOrder) ||
+    sortOrder < -100000 ||
+    sortOrder > 100000
+  ) {
+    throw fail(400, "Некорректный порядок сортировки.");
+  }
+
+  if (imageUrl) {
+    try {
+      const parsed = new URL(imageUrl);
+
+      if (
+        parsed.protocol !== "https:" ||
+        parsed.username ||
+        parsed.password
+      ) {
+        throw new Error();
+      }
+    } catch {
+      throw fail(
+        400,
+        "Укажите обычную HTTPS-ссылку на фотографию."
+      );
+    }
+  }
+
+  return {
+    id,
+    name,
+    category,
+    description,
+    unit,
+    imageUrl,
+    priceRub,
+    oldPriceRub,
+    oldPriceProvided,
+    available,
+    sortOrder
+  };
+}
+
+function mapProductDatabaseError(error) {
+  if (
+    error.code === "23514" &&
+    error.constraint === "lv_products_old_price_check"
+  ) {
+    return fail(
+      400,
+      "Старая цена должна быть выше текущей " +
+      "и не превышать 1000000 ₽. " +
+      "Исправьте или очистите старую цену."
+    );
+  }
+
+  return error;
+}
+
+async function createProduct(data) {
+  const id =
+    data.id === undefined
+      ? `product-${crypto.randomUUID()}`
+      : text(data.id, 80);
+
+  const p = normalizeProduct(data, id);
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO lv_products (
+        id, name, category, description,
+        price_rub, old_price_rub, unit,
+        image_url, available, sort_order
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *`,
+      [
+        p.id,
+        p.name,
+        p.category,
+        p.description,
+        p.priceRub,
+        p.oldPriceRub,
+        p.unit,
+        p.imageUrl,
+        p.available,
+        p.sortOrder
+      ]
+    );
+
+    return productView(result.rows[0]);
+  } catch (error) {
+    if (error.code === "23505") {
+      throw fail(
+        409,
+        "Товар с таким кодом уже существует."
+      );
+    }
+
+    throw mapProductDatabaseError(error);
+  }
+}
+
+async function updateProduct(id, data) {
+  const p = normalizeProduct(data, id);
+
+  try {
+    const result = await pool.query(
+      `UPDATE lv_products SET
+        name = $2,
+        category = $3,
+        description = $4,
+        price_rub = $5,
+        old_price_rub = CASE
+          WHEN $6::boolean THEN $7::integer
+          ELSE old_price_rub
+        END,
+        unit = $8,
+        image_url = $9,
+        available = $10,
+        sort_order = $11,
+        updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [
+        p.id,
+        p.name,
+        p.category,
+        p.description,
+        p.priceRub,
+        p.oldPriceProvided,
+        p.oldPriceRub,
+        p.unit,
+        p.imageUrl,
+        p.available,
+        p.sortOrder
+      ]
+    );
+
+    if (!result.rows.length) {
+      throw fail(404, "Товар не найден.");
+    }
+
+    return productView(result.rows[0]);
+  } catch (error) {
+    throw mapProductDatabaseError(error);
+  }
+}
+
+// -------------------- ПРОВЕРКА ЗАКАЗА --------------------
+
 function accessTokenHashFromInput(data) {
+  // Совместимость с приложением без отслеживания.
   if (data.orderAccessToken === undefined) {
     return null;
   }
 
   if (
     typeof data.orderAccessToken !== "string" ||
-    !ACCESS_TOKEN_PATTERN.test(data.orderAccessToken)
+    !TOKEN_PATTERN.test(data.orderAccessToken)
   ) {
     throw fail(
       400,
-      "Некорректный ключ просмотра заказа. Обновите приложение."
+      "Некорректный ключ просмотра заказа. " +
+      "Обновите приложение."
     );
   }
 
@@ -472,7 +809,11 @@ function normalizeOrder(data) {
   const seen = new Set();
 
   const items = data.items.map((item) => {
-    if (!item || typeof item !== "object") {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      Array.isArray(item)
+    ) {
       throw fail(400, "Некорректная позиция заказа.");
     }
 
@@ -480,7 +821,7 @@ function normalizeOrder(data) {
     const quantity = item.quantity;
 
     if (
-      !/^[a-z0-9_-]{1,80}$/.test(productId) ||
+      !PRODUCT_ID_PATTERN.test(productId) ||
       typeof quantity !== "number" ||
       !Number.isFinite(quantity) ||
       quantity < 0.5 ||
@@ -490,26 +831,20 @@ function normalizeOrder(data) {
     ) {
       throw fail(
         400,
-        "Проверьте количество товаров: " +
-        "для килограммов используется шаг 0,5."
+        "Проверьте количество товаров. " +
+        "Для килограммов используется шаг 0,5."
       );
     }
 
     seen.add(productId);
-
-    return {
-      productId,
-      quantity
-    };
+    return { productId, quantity };
   });
 
   items.sort((a, b) =>
     a.productId.localeCompare(b.productId)
   );
 
-  // Не меняем порядок полей и состав fingerprint:
-  // повторная отправка прежних заказов совместима.
-  // Секретный ключ обрабатывается отдельно.
+  // Порядок полей важен для повторной отправки.
   return {
     requestId,
     name,
@@ -520,6 +855,8 @@ function normalizeOrder(data) {
     items
   };
 }
+
+// -------------------- СОХРАНЕНИЕ ЗАКАЗА --------------------
 
 async function saveOrder(order, trackingTokenHash) {
   const fingerprint = sha256(JSON.stringify(order));
@@ -539,40 +876,32 @@ async function saveOrder(order, trackingTokenHash) {
     );
 
     if (existing.rows.length) {
-      const previous = existing.rows[0];
+      const row = existing.rows[0];
 
-      if (previous.fingerprint !== fingerprint) {
+      if (row.fingerprint !== fingerprint) {
         throw fail(
           409,
           "Этот идентификатор уже использован другим заказом."
         );
       }
 
-      // Нельзя заменить ключ уже созданного заказа
-      // другим ключом при повторной отправке.
       if (
-        previous.tracking_token_hash &&
+        row.tracking_token_hash &&
         trackingTokenHash &&
         !sameHash(
-          previous.tracking_token_hash,
+          row.tracking_token_hash,
           trackingTokenHash
         )
       ) {
         throw fail(
           409,
-          "Ключ просмотра не совпадает с сохранённым заказом. " +
-          "Не оформляйте заказ повторно: свяжитесь с магазином."
+          "Ключ просмотра не совпадает с заказом. " +
+          "Не оформляйте его заново: свяжитесь с магазином."
         );
       }
 
-      // Старому заказу без ключа не назначаем новый ключ
-      // через повторную отправку.
       await client.query("COMMIT");
-
-      return {
-        row: previous,
-        created: false
-      };
+      return { row, created: false };
     }
 
     const found = await client.query(
@@ -610,7 +939,8 @@ async function saveOrder(order, trackingTokenHash) {
         );
       }
 
-      const priceKopecks = product.price_rub * 100;
+      // Старая цена НЕ используется в расчёте.
+      const priceKopecks = Number(product.price_rub) * 100;
       const lineKopecks = priceKopecks * item.quantity;
 
       if (
@@ -627,7 +957,7 @@ async function saveOrder(order, trackingTokenHash) {
         name: product.name,
         unit: product.unit,
         quantity: item.quantity,
-        priceRub: product.price_rub,
+        priceRub: Number(product.price_rub),
         totalRub: lineKopecks / 100
       };
     });
@@ -637,24 +967,16 @@ async function saveOrder(order, trackingTokenHash) {
       totalKopecks <= 0 ||
       totalKopecks > 1000000000
     ) {
-      throw fail(400, "Слишком большая сумма заказа.");
+      throw fail(400, "Недопустимая сумма заказа.");
     }
 
-    const totalRub = (totalKopecks / 100).toFixed(2);
     const id = `LV-${crypto.randomUUID()}`;
 
     const result = await client.query(
       `INSERT INTO lv_orders (
-        id,
-        request_id,
-        fingerprint,
-        customer_name,
-        phone,
-        fulfillment,
-        address,
-        comment,
-        items,
-        total_rub,
+        id, request_id, fingerprint,
+        customer_name, phone, fulfillment,
+        address, comment, items, total_rub,
         tracking_token_hash
       )
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11)
@@ -669,7 +991,7 @@ async function saveOrder(order, trackingTokenHash) {
         order.address,
         order.comment,
         JSON.stringify(snapshot),
-        totalRub,
+        (totalKopecks / 100).toFixed(2),
         trackingTokenHash
       ]
     );
@@ -688,11 +1010,13 @@ async function saveOrder(order, trackingTokenHash) {
   }
 }
 
+// -------------------- TELEGRAM --------------------
+
 async function notifyTelegram(row) {
   let notificationStatus = "not_configured";
 
   if (BOT_TOKEN && CHAT_ID) {
-    const lines = row.items.map((item) => {
+    const itemLines = row.items.map((item) => {
       const quantity = String(item.quantity).replace(".", ",");
 
       return (
@@ -705,8 +1029,8 @@ async function notifyTelegram(row) {
       row.fulfillment === "pickup"
         ? `Самовывоз: ${PICKUP}`
         : Number(row.total_rub) >= 2000
-          ? "Бесплатная доставка по Макеевке, Донецку и Харцызску. " +
-            "Другие города — по согласованию."
+          ? "Бесплатная доставка по Макеевке, Донецку " +
+            "и Харцызску. Другие города — по согласованию."
           : "Стоимость доставки согласуется с покупателем.";
 
     const message = [
@@ -719,22 +1043,16 @@ async function notifyTelegram(row) {
         ? `Доставка: ${row.address}`
         : "Получение: самовывоз",
       "",
-      ...lines,
+      ...itemLines,
       "",
       `Товары: ${rub(row.total_rub)}`,
       deliveryText,
       "Оплата при получении.",
       row.comment ? `Комментарий: ${row.comment}` : ""
-    ].filter(Boolean).join("\n");
-
-    const parts = [];
-
-    for (let i = 0; i < message.length; i += 3500) {
-      parts.push(message.slice(i, i + 3500));
-    }
+    ].join("\n");
 
     try {
-      for (const part of parts) {
+      for (let i = 0; i < message.length; i += 3500) {
         const response = await fetch(
           `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
           {
@@ -744,15 +1062,15 @@ async function notifyTelegram(row) {
             },
             body: JSON.stringify({
               chat_id: CHAT_ID,
-              text: part
+              text: message.slice(i, i + 3500)
             }),
             signal: AbortSignal.timeout(12000)
           }
         );
 
-        const body = await response.json();
+        const result = await response.json();
 
-        if (!response.ok || !body.ok) {
+        if (!response.ok || !result.ok) {
           throw new Error("Telegram did not confirm delivery");
         }
       }
@@ -762,7 +1080,7 @@ async function notifyTelegram(row) {
       notificationStatus = "unconfirmed";
 
       console.error(
-        `Нет подтверждения Telegram для заказа № ${row.order_number}`
+        `Нет подтверждения Telegram: заказ № ${row.order_number}`
       );
     }
   }
@@ -770,164 +1088,83 @@ async function notifyTelegram(row) {
   try {
     await pool.query(
       `UPDATE lv_orders
-       SET telegram_status = $2,
-           updated_at = NOW()
+       SET telegram_status = $2, updated_at = NOW()
        WHERE id = $1`,
       [row.id, notificationStatus]
     );
   } catch {
     console.error(
-      `Не обновлён статус уведомления заказа № ${row.order_number}`
+      `Не обновлён статус уведомления: заказ № ${row.order_number}`
     );
   }
 
   return notificationStatus;
 }
 
-function normalizeProduct(data, id) {
-  const name = text(data.name, 120);
-  const category =
-    text(data.category, 80) || "Рыба и морепродукты";
-  const description = text(data.description, 2000);
-  const unit = text(data.unit, 20) || "кг";
-  const imageUrl = text(data.imageUrl, 1500);
-  const priceRub = data.priceRub;
+// -------------------- ПРОСМОТР ЗАКАЗА ПОКУПАТЕЛЕМ --------------------
 
-  const available =
-    data.available === undefined ? true : data.available;
+async function lookupCustomerOrder(data) {
+  const id = data.id;
+  const accessToken = data.orderAccessToken;
 
-  const sortOrder =
-    data.sortOrder === undefined ? 0 : data.sortOrder;
-
-  if (!/^[a-z0-9_-]{1,80}$/.test(id)) {
-    throw fail(400, "Некорректный код товара.");
-  }
-
-  if (name.length < 2) {
-    throw fail(400, "Укажите название товара.");
+  function unavailable() {
+    return fail(
+      404,
+      "Заказ недоступен. Проверьте, что он оформлен " +
+      "в этой версии приложения на этом телефоне."
+    );
   }
 
   if (
-    !Number.isInteger(priceRub) ||
-    priceRub < 1 ||
-    priceRub > 1000000
+    typeof id !== "string" ||
+    !ORDER_ID_PATTERN.test(id) ||
+    typeof accessToken !== "string" ||
+    !TOKEN_PATTERN.test(accessToken)
   ) {
-    throw fail(
-      400,
-      "Цена должна быть целым числом от 1 до 1000000."
-    );
+    throw unavailable();
   }
 
-  if (typeof available !== "boolean") {
-    throw fail(400, "Некорректное значение наличия товара.");
+  const result = await pool.query(
+    `SELECT
+       id, order_number, created_at, updated_at,
+       fulfillment, items, total_rub, status,
+       tracking_token_hash
+     FROM lv_orders
+     WHERE id = $1`,
+    [id]
+  );
+
+  const row = result.rows[0];
+
+  const expectedHash =
+    row && row.tracking_token_hash
+      ? row.tracking_token_hash
+      : "0".repeat(64);
+
+  const matches = sameHash(
+    sha256(accessToken),
+    expectedHash
+  );
+
+  if (!row || !row.tracking_token_hash || !matches) {
+    throw unavailable();
   }
 
-  if (
-    !Number.isInteger(sortOrder) ||
-    sortOrder < -100000 ||
-    sortOrder > 100000
-  ) {
-    throw fail(400, "Некорректный порядок сортировки.");
-  }
-
-  if (imageUrl) {
-    try {
-      const url = new URL(imageUrl);
-
-      if (
-        url.protocol !== "https:" ||
-        url.username ||
-        url.password
-      ) {
-        throw new Error();
-      }
-    } catch {
-      throw fail(
-        400,
-        "Укажите обычную HTTPS-ссылку на фотографию."
-      );
-    }
-  }
-
-  return {
-    id,
-    name,
-    category,
-    description,
-    priceRub,
-    unit,
-    imageUrl,
-    available,
-    sortOrder
-  };
+  return customerOrderView(row);
 }
 
-let limitStarted = Date.now();
-let writeRequests = 0;
-
-function limitWrites(req) {
-  const methods = ["POST", "PUT", "PATCH", "DELETE"];
-  if (!methods.includes(req.method)) return;
-
-  if (Date.now() - limitStarted > 60000) {
-    limitStarted = Date.now();
-    writeRequests = 0;
-  }
-
-  writeRequests += 1;
-
-  if (writeRequests > 120) {
-    throw fail(
-      429,
-      "Слишком много запросов. Попробуйте через минуту."
-    );
-  }
-}
-
-let uploadLimitStarted = Date.now();
-let uploadRequests = 0;
-let activeUploads = 0;
-
-function limitImageUploads() {
-  if (Date.now() - uploadLimitStarted > 60000) {
-    uploadLimitStarted = Date.now();
-    uploadRequests = 0;
-  }
-
-  uploadRequests += 1;
-
-  if (uploadRequests > 10) {
-    throw fail(
-      429,
-      "Можно загрузить до 10 фотографий за минуту. " +
-      "Подождите немного."
-    );
-  }
-
-  if (activeUploads >= 2) {
-    throw fail(
-      503,
-      "Другие фотографии ещё загружаются. " +
-      "Попробуйте чуть позже."
-    );
-  }
-}
+// -------------------- ФОТОГРАФИИ --------------------
 
 function decodeImage(data) {
   const mimeType = data.mimeType;
   const base64 = data.base64;
 
-  const allowed = [
-    "image/jpeg",
-    "image/png",
-    "image/webp"
-  ];
-
-  if (!allowed.includes(mimeType)) {
-    throw fail(
-      400,
-      "Поддерживаются фотографии JPG, PNG и WEBP."
-    );
+  if (
+    !["image/jpeg", "image/png", "image/webp"].includes(
+      mimeType
+    )
+  ) {
+    throw fail(400, "Поддерживаются JPG, PNG и WEBP.");
   }
 
   if (
@@ -969,12 +1206,12 @@ function decodeImage(data) {
     buffer.toString("ascii", 0, 4) === "RIFF" &&
     buffer.toString("ascii", 8, 12) === "WEBP";
 
-  const correctType =
+  const matches =
     (mimeType === "image/jpeg" && isJpeg) ||
     (mimeType === "image/png" && isPng) ||
     (mimeType === "image/webp" && isWebp);
 
-  if (!correctType) {
+  if (!matches) {
     throw fail(
       400,
       "Содержимое файла не соответствует формату фотографии."
@@ -986,11 +1223,7 @@ function decodeImage(data) {
 
 async function uploadImageToCloudinary(image) {
   if (!cloudinaryConfigured()) {
-    throw fail(
-      503,
-      "Хранилище фото не настроено. " +
-      "Проверьте переменные Cloudinary в Render."
-    );
+    throw fail(503, "Хранилище фотографий не настроено.");
   }
 
   const extension = {
@@ -1024,6 +1257,7 @@ async function uploadImageToCloudinary(image) {
 
   form.append("api_key", CLOUD_API_KEY);
   form.append("signature", signature);
+
   form.append(
     "file",
     new Blob([image.buffer], { type: image.mimeType }),
@@ -1049,7 +1283,7 @@ async function uploadImageToCloudinary(image) {
     throw fail(
       502,
       "Нет подтверждения от хранилища фотографий. " +
-      "Проверьте соединение и попробуйте позже."
+      "Попробуйте позже."
     );
   }
 
@@ -1060,16 +1294,15 @@ async function uploadImageToCloudinary(image) {
     ) {
       throw fail(
         502,
-        "Cloudinary отклонил доступ. Проверьте Cloud name, " +
-        "API Key и API Secret. Ключ и секрет должны " +
-        "быть из одной строки."
+        "Cloudinary отклонил доступ. " +
+        "Проверьте Cloud name, API Key и API Secret в Render."
       );
     }
 
     if (response.status === 429) {
       throw fail(
         502,
-        "Хранилище временно ограничило загрузку. " +
+        "Хранилище ограничило загрузку. " +
         "Проверьте лимиты Cloudinary."
       );
     }
@@ -1077,20 +1310,19 @@ async function uploadImageToCloudinary(image) {
     throw fail(
       502,
       "Хранилище не приняло фотографию. " +
-      "Попробуйте JPG или PNG. Проверьте настройки " +
-      "и доступные лимиты Cloudinary."
+      "Попробуйте JPG или PNG и проверьте лимиты."
     );
   }
 
-  let imageUrl;
+  let parsed;
 
   try {
-    imageUrl = new URL(result.secure_url);
+    parsed = new URL(result.secure_url);
 
     if (
-      imageUrl.protocol !== "https:" ||
-      imageUrl.hostname !== "res.cloudinary.com" ||
-      !imageUrl.pathname.startsWith(`/${CLOUD_NAME}/`) ||
+      parsed.protocol !== "https:" ||
+      parsed.hostname !== "res.cloudinary.com" ||
+      !parsed.pathname.startsWith(`/${CLOUD_NAME}/`) ||
       result.resource_type !== "image" ||
       result.format !== "jpg"
     ) {
@@ -1104,70 +1336,14 @@ async function uploadImageToCloudinary(image) {
   }
 
   return {
-    imageUrl: imageUrl.href,
+    imageUrl: parsed.href,
     width: result.width,
     height: result.height,
     bytes: result.bytes
   };
 }
 
-// Проверка одного заказа по внутреннему id
-// и секретному ключу из приложения.
-// Ключ передаётся в JSON, не в адресной строке.
-async function lookupCustomerOrder(data) {
-  const id = data.id;
-  const accessToken = data.orderAccessToken;
-
-  const unavailable = () => fail(
-    404,
-    "Заказ недоступен. Проверьте, что он оформлен " +
-    "в этой версии приложения на этом телефоне."
-  );
-
-  if (
-    typeof id !== "string" ||
-    !ORDER_ID_PATTERN.test(id) ||
-    typeof accessToken !== "string" ||
-    !ACCESS_TOKEN_PATTERN.test(accessToken)
-  ) {
-    throw unavailable();
-  }
-
-  const result = await pool.query(
-    `SELECT
-       id,
-       order_number,
-       created_at,
-       updated_at,
-       fulfillment,
-       items,
-       total_rub,
-       status,
-       tracking_token_hash
-     FROM lv_orders
-     WHERE id = $1`,
-    [id]
-  );
-
-  const row = result.rows[0];
-  const suppliedHash = sha256(accessToken);
-
-  // Для отсутствующего заказа также выполняется
-  // сравнение хешей. Ответ при неверном ключе
-  // и отсутствующем заказе одинаковый.
-  const storedHash =
-    row && row.tracking_token_hash
-      ? row.tracking_token_hash
-      : "0".repeat(64);
-
-  const matches = sameHash(suppliedHash, storedHash);
-
-  if (!row || !row.tracking_token_hash || !matches) {
-    throw unavailable();
-  }
-
-  return customerOrderView(row);
-}
+// -------------------- ОБРАБОТЧИК ЗАПРОСОВ --------------------
 
 async function handle(req, res) {
   limitWrites(req);
@@ -1175,6 +1351,7 @@ async function handle(req, res) {
   const url = new URL(req.url, "http://localhost");
   const pathname = url.pathname;
 
+  // Проверка сервера.
   if (
     req.method === "GET" &&
     (pathname === "/" || pathname === "/health")
@@ -1190,10 +1367,12 @@ async function handle(req, res) {
       orderNumbersEnabled: true,
       imageUploadConfigured: cloudinaryConfigured(),
       quantityStepsEnabled: true,
-      orderTrackingEnabled: true
+      orderTrackingEnabled: true,
+      promotionsEnabled: true
     });
   }
 
+  // Каталог покупателя.
   if (
     req.method === "GET" &&
     pathname === "/api/products"
@@ -1205,10 +1384,12 @@ async function handle(req, res) {
     );
 
     return json(res, 200, {
-      products: result.rows.map(productView)
+      products: result.rows.map(productView),
+      promotionsEnabled: true
     });
   }
 
+  // Категории.
   if (
     req.method === "GET" &&
     pathname === "/api/categories"
@@ -1225,6 +1406,7 @@ async function handle(req, res) {
     });
   }
 
+  // Защищённый просмотр статуса покупателем.
   if (
     req.method === "POST" &&
     pathname === "/api/orders/lookup"
@@ -1238,28 +1420,21 @@ async function handle(req, res) {
     });
   }
 
+  // Оформление заказа.
   if (
     req.method === "POST" &&
     pathname === "/api/orders"
   ) {
     const data = await readJson(req);
     const trackingTokenHash = accessTokenHashFromInput(data);
-    const input = normalizeOrder(data);
-    const saved = await saveOrder(input, trackingTokenHash);
+    const order = normalizeOrder(data);
+    const saved = await saveOrder(order, trackingTokenHash);
 
     let telegramStatus = saved.row.telegram_status;
 
     if (saved.created) {
       telegramStatus = await notifyTelegram(saved.row);
     }
-
-    const orderTrackingAvailable = Boolean(
-      trackingTokenHash &&
-      sameHash(
-        saved.row.tracking_token_hash,
-        trackingTokenHash
-      )
-    );
 
     return json(res, saved.created ? 201 : 200, {
       ok: true,
@@ -1268,40 +1443,54 @@ async function handle(req, res) {
       totalRub: Number(saved.row.total_rub),
       status: saved.row.status,
       telegramStatus,
-      orderTrackingAvailable,
+      orderTrackingAvailable: Boolean(
+        trackingTokenHash &&
+        sameHash(
+          saved.row.tracking_token_hash,
+          trackingTokenHash
+        )
+      ),
       message: "Заказ сохранён в магазине."
     });
   }
 
+  // Страница панели продавца.
   if (
     req.method === "GET" &&
     (pathname === "/admin" || pathname === "/admin/")
   ) {
+    let html;
+
     try {
-      const html = await fs.readFile(
+      html = await fs.readFile(
         path.join(__dirname, "admin.html"),
         "utf8"
       );
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
 
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-Content-Type-Options": "nosniff",
-        "X-Frame-Options": "DENY",
-        "Referrer-Policy": "no-referrer"
-      });
-
-      return res.end(html);
-    } catch {
-      return json(res, 404, {
-        error: "Файл панели продавца ещё не добавлен."
-      });
+      throw fail(
+        404,
+        "Файл панели продавца ещё не добавлен."
+      );
     }
+
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "no-referrer"
+    });
+
+    return res.end(html);
   }
 
+  // Все маршруты продавца требуют секретный ключ.
   if (pathname.startsWith("/api/admin/")) {
     checkAdmin(req);
 
+    // Возможности сервера для админки.
     if (
       req.method === "GET" &&
       pathname === "/api/admin/config"
@@ -1315,19 +1504,25 @@ async function handle(req, res) {
           "image/webp"
         ],
         quantityStepsEnabled: true,
-        orderTrackingEnabled: true
+        orderTrackingEnabled: true,
+        promotionsEnabled: true,
+        oldPriceField: "oldPriceRub"
       });
     }
 
+    // Загрузка фотографии.
     if (
       req.method === "POST" &&
       pathname === "/api/admin/images"
     ) {
       if (!cloudinaryConfigured()) {
-        throw fail(503, "Хранилище фото ещё не настроено.");
+        throw fail(
+          503,
+          "Хранилище фотографий ещё не настроено."
+        );
       }
 
-      limitImageUploads();
+      limitUploads();
       activeUploads += 1;
 
       try {
@@ -1351,6 +1546,7 @@ async function handle(req, res) {
       }
     }
 
+    // Все товары для продавца.
     if (
       req.method === "GET" &&
       pathname === "/api/admin/products"
@@ -1361,147 +1557,85 @@ async function handle(req, res) {
       );
 
       return json(res, 200, {
-        products: result.rows.map(productView)
+        products: result.rows.map(productView),
+        promotionsEnabled: true
       });
     }
 
+    // Добавление товара.
     if (
       req.method === "POST" &&
       pathname === "/api/admin/products"
     ) {
       const data = await readJson(req);
+      const product = await createProduct(data);
 
-      const id =
-        data.id === undefined
-          ? `product-${crypto.randomUUID()}`
-          : text(data.id, 80);
-
-      const p = normalizeProduct(data, id);
-
-      try {
-        const result = await pool.query(
-          `INSERT INTO lv_products (
-            id,
-            name,
-            category,
-            description,
-            price_rub,
-            unit,
-            image_url,
-            available,
-            sort_order
-          )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-          RETURNING *`,
-          [
-            p.id,
-            p.name,
-            p.category,
-            p.description,
-            p.priceRub,
-            p.unit,
-            p.imageUrl,
-            p.available,
-            p.sortOrder
-          ]
-        );
-
-        return json(res, 201, {
-          product: productView(result.rows[0])
-        });
-      } catch (error) {
-        if (error.code === "23505") {
-          throw fail(409, "Товар с таким кодом уже существует.");
-        }
-
-        throw error;
-      }
+      return json(res, 201, {
+        ok: true,
+        product
+      });
     }
 
+    // Изменение товара.
     const productMatch = pathname.match(
       /^\/api\/admin\/products\/([a-z0-9_-]{1,80})$/
     );
 
     if (req.method === "PUT" && productMatch) {
-      const p = normalizeProduct(
-        await readJson(req),
-        productMatch[1]
+      const data = await readJson(req);
+      const product = await updateProduct(
+        productMatch[1],
+        data
       );
-
-      const result = await pool.query(
-        `UPDATE lv_products SET
-          name = $2,
-          category = $3,
-          description = $4,
-          price_rub = $5,
-          unit = $6,
-          image_url = $7,
-          available = $8,
-          sort_order = $9,
-          updated_at = NOW()
-         WHERE id = $1
-         RETURNING *`,
-        [
-          p.id,
-          p.name,
-          p.category,
-          p.description,
-          p.priceRub,
-          p.unit,
-          p.imageUrl,
-          p.available,
-          p.sortOrder
-        ]
-      );
-
-      if (!result.rows.length) {
-        throw fail(404, "Товар не найден.");
-      }
 
       return json(res, 200, {
-        product: productView(result.rows[0])
+        ok: true,
+        product
       });
     }
 
+    // Список заказов.
     if (
       req.method === "GET" &&
       pathname === "/api/admin/orders"
     ) {
-      const page = Math.max(
-        1,
-        Math.min(
-          100000,
-          Number.parseInt(
-            url.searchParams.get("page"),
-            10
-          ) || 1
-        )
-      );
+      const rawPage = url.searchParams.get("page") || "1";
+
+      if (!/^[1-9]\d{0,5}$/.test(rawPage)) {
+        throw fail(400, "Некорректный номер страницы.");
+      }
+
+      const page = Number(rawPage);
+      const pageSize = 50;
+      const offset = (page - 1) * pageSize;
 
       const result = await pool.query(
         `SELECT * FROM lv_orders
          ORDER BY created_at DESC, id DESC
-         LIMIT 50 OFFSET $1`,
-        [(page - 1) * 50]
+         LIMIT $1 OFFSET $2`,
+        [pageSize, offset]
       );
 
       return json(res, 200, {
         orders: result.rows.map(orderView),
         page,
-        pageSize: 50
+        pageSize
       });
     }
 
+    // Смена статуса заказа.
     const statusMatch = pathname.match(
       /^\/api\/admin\/orders\/(LV-[0-9a-f-]{36})\/status$/
     );
 
     if (req.method === "PATCH" && statusMatch) {
-      if (!ORDER_ID_PATTERN.test(statusMatch[1])) {
-        throw fail(404, "Заказ не найден.");
+      const id = statusMatch[1];
+
+      if (!ORDER_ID_PATTERN.test(id)) {
+        throw fail(400, "Некорректный номер заказа.");
       }
 
-      const data = await readJson(req);
+      const data = await readJson(req, 4096);
 
       if (!ORDER_STATUSES.includes(data.status)) {
         throw fail(400, "Некорректный статус заказа.");
@@ -1509,11 +1643,10 @@ async function handle(req, res) {
 
       const result = await pool.query(
         `UPDATE lv_orders
-         SET status = $2,
-             updated_at = NOW()
+         SET status = $2, updated_at = NOW()
          WHERE id = $1
          RETURNING *`,
-        [statusMatch[1], data.status]
+        [id, data.status]
       );
 
       if (!result.rows.length) {
@@ -1521,80 +1654,117 @@ async function handle(req, res) {
       }
 
       return json(res, 200, {
+        ok: true,
         order: orderView(result.rows[0])
       });
     }
   }
 
-  return json(res, 404, {
-    error: "Страница не найдена."
-  });
+  throw fail(404, "Страница не найдена.");
 }
+
+// -------------------- ЗАПУСК СЕРВЕРА --------------------
 
 const server = http.createServer((req, res) => {
   handle(req, res).catch((error) => {
-    if (res.writableEnded || res.destroyed) return;
+    if (res.destroyed || res.writableEnded) return;
 
-    const status = Number.isInteger(error.status)
-      ? error.status
-      : 500;
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
 
-    if (status >= 500) {
-      // Не записываем тела запросов, ключи,
-      // пароли и персональные данные в журнал.
-      console.error(
-        "Ошибка обработки запроса:",
-        error.code || "internal"
-      );
+    const status =
+      Number.isInteger(error.status) &&
+      error.status >= 400 &&
+      error.status <= 599
+        ? error.status
+        : 500;
+
+    if (status === 500) {
+      // Не выводим содержимое заказа и секреты в журнал.
+      const code =
+        typeof error.code === "string"
+          ? error.code
+          : "UNKNOWN";
+
+      console.error("Ошибка обработки запроса. Код:", code);
     }
 
     json(res, status, {
+      ok: false,
       error:
         status === 500
-          ? "Ошибка сервера. Повторите запрос позже."
+          ? "Ошибка сервера. Если вы отправляли заказ, " +
+            "его результат пока не подтверждён. " +
+            "Повторите отправку того же сохранённого заказа."
           : error.message
     });
   });
 });
 
-server.requestTimeout = 90000;
+server.requestTimeout = 60000;
 server.headersTimeout = 15000;
 server.keepAliveTimeout = 5000;
 
-initializeDatabase()
-  .then(() => {
-    server.listen(PORT, "0.0.0.0", () => {
-      console.log("Сервер Лавки Вкуса запущен.");
-      console.log("База данных подключена.");
-      console.log("Короткие номера заказов включены.");
-      console.log("Поддержка веса с шагом 0,5 кг включена.");
-      console.log("Защищённая проверка статуса заказов включена.");
+server.on("error", (error) => {
+  console.error(
+    "Ошибка HTTP-сервера:",
+    error.code || "UNKNOWN"
+  );
 
-      console.log(
-        cloudinaryConfigured()
-          ? "Переменные хранилища фотографий заданы."
-          : "Хранилище фотографий пока не настроено."
-      );
+  process.exit(1);
+});
+
+async function start() {
+  try {
+    await initializeDatabase();
+
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`Лавка Вкуса: сервер запущен на порту ${PORT}`);
+      console.log("Поддержка акций включена.");
     });
-  })
-  .catch((error) => {
+  } catch (error) {
     console.error(
       "Не удалось подготовить базу данных:",
-      error.code || "connection_error"
+      error.code || "UNKNOWN",
+      error.message
     );
 
+    await pool.end().catch(() => {});
     process.exit(1);
-  });
+  }
+}
 
-process.on("SIGTERM", () => {
+let shuttingDown = false;
+
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  const timer = setTimeout(() => {
+    process.exit(1);
+  }, 25000);
+
+  timer.unref();
+
   server.close(() => {
-    pool.end().finally(() => process.exit(0));
+    pool.end().then(
+      () => {
+        clearTimeout(timer);
+        process.exit(0);
+      },
+      () => {
+        clearTimeout(timer);
+        process.exit(1);
+      }
+    );
   });
+}
 
-  setTimeout(
-    () => process.exit(1),
-    10000
-  ).unref();
-});
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
+
+start();
 
 // КОНЕЦ ФАЙЛА
