@@ -6,6 +6,7 @@
         content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#121212">
   <meta name="referrer" content="no-referrer">
+
   <title>Лавка Вкуса — управление</title>
 
   <style>
@@ -92,12 +93,14 @@
       padding: 20px 16px 48px;
     }
 
-    .subtitle, .muted {
+    .subtitle,
+    .muted {
       color: var(--muted);
       font-size: 14px;
     }
 
-    .panel, .card {
+    .panel,
+    .card {
       border: 1px solid var(--border);
       border-radius: 18px;
       background: var(--card);
@@ -125,7 +128,9 @@
       margin: 13px 0 6px;
     }
 
-    input, textarea, select {
+    input,
+    textarea,
+    select {
       width: 100%;
       min-height: 46px;
       background: var(--field);
@@ -137,9 +142,12 @@
       font-size: 16px;
     }
 
-    input:focus, textarea:focus, select:focus {
+    input:focus,
+    textarea:focus,
+    select:focus,
+    button:focus-visible {
       outline: 2px solid var(--gold);
-      outline-offset: 1px;
+      outline-offset: 2px;
     }
 
     input[readonly] {
@@ -168,9 +176,12 @@
       color: var(--gold);
     }
 
-    button:disabled {
-      opacity: .5;
-      cursor: wait;
+    button:disabled,
+    input:disabled,
+    select:disabled,
+    textarea:disabled {
+      opacity: .55;
+      cursor: not-allowed;
     }
 
     .wide {
@@ -187,9 +198,11 @@
       margin-bottom: 18px;
     }
 
-    .tabs {
+    .tabs,
+    .row {
       display: flex;
-      gap: 8px;
+      align-items: center;
+      gap: 10px;
       flex-wrap: wrap;
     }
 
@@ -205,7 +218,8 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      grid-template-columns:
+        repeat(auto-fill, minmax(250px, 1fr));
       gap: 14px;
     }
 
@@ -236,18 +250,34 @@
 
     .product-image {
       width: 100%;
-      height: 170px;
+      height: 180px;
       object-fit: cover;
       border-radius: 11px;
       margin-bottom: 12px;
       background: var(--field);
     }
 
-    .row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
+    .photo-box {
+      border: 1px dashed var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      margin-top: 10px;
+      background: var(--field);
+    }
+
+    .photo-preview {
+      display: block;
+      width: 100%;
+      max-height: 320px;
+      object-fit: contain;
+      border-radius: 10px;
+      background: #101010;
+      margin-bottom: 12px;
+    }
+
+    #photoStatus {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
 
     .check {
@@ -271,7 +301,8 @@
 
     .order-id {
       color: var(--gold);
-      font-size: 14px;
+      font-size: 20px;
+      font-weight: 700;
       overflow-wrap: anywhere;
     }
 
@@ -324,7 +355,8 @@
         font-size: 20px;
       }
 
-      .panel, .card {
+      .panel,
+      .card {
         padding: 15px;
       }
     }
@@ -351,13 +383,14 @@
 
     <section id="loginPanel" class="panel login">
       <h2>Вход для продавца</h2>
+
       <p class="muted">
-        Введите значение ADMIN_TOKEN, которое вы сохранили
-        в настройках Render.
+        Введите значение ADMIN_TOKEN из настроек Render.
       </p>
 
       <form id="loginForm">
         <label for="adminKey">Секретный ключ</label>
+
         <input id="adminKey"
                type="password"
                autocomplete="off"
@@ -366,23 +399,28 @@
                minlength="32"
                required>
 
-        <button id="loginButton" class="wide" type="submit">
+        <button id="loginButton"
+                class="wide"
+                type="submit">
           Войти
         </button>
       </form>
 
       <p class="muted">
-        Панель не сохраняет ключ в локальное хранилище браузера.
-        После обновления страницы потребуется войти снова.
+        Панель не записывает ключ в локальное хранилище.
+        После обновления страницы войдите снова.
       </p>
     </section>
 
     <div id="application" hidden>
       <div class="toolbar">
         <nav class="tabs" aria-label="Разделы управления">
-          <button id="productsTab" class="active" type="button">
+          <button id="productsTab"
+                  class="active"
+                  type="button">
             Товары
           </button>
+
           <button id="ordersTab" type="button">
             Заказы
           </button>
@@ -397,17 +435,19 @@
 
       <section id="productsSection">
         <div class="notice">
-          Изменения сохраняются в базе магазина.
-          Установленная старая версия Android-приложения пока
-          не загружает каталог из базы. Подключим её следующим этапом.
+          Товары и цены сохраняются в базе магазина.
+          Чтобы увидеть изменения в новой версии приложения,
+          обновите каталог в приложении.
         </div>
 
         <div class="toolbar">
           <h2>Каталог магазина</h2>
+
           <div class="row">
             <button id="newProductButton" type="button">
               + Добавить товар
             </button>
+
             <button id="refreshProductsButton"
                     class="secondary"
                     type="button">
@@ -426,6 +466,7 @@
             </div>
 
             <label for="productName">Название товара</label>
+
             <input id="productName"
                    type="text"
                    minlength="2"
@@ -435,14 +476,17 @@
             <div class="two">
               <div>
                 <label for="productCategory">Категория</label>
+
                 <input id="productCategory"
                        type="text"
                        maxlength="80"
                        placeholder="Например: Рыба"
                        required>
               </div>
+
               <div>
                 <label for="productUnit">Единица продажи</label>
+
                 <select id="productUnit">
                   <option value="кг">Килограмм — кг</option>
                   <option value="шт">Штука — шт</option>
@@ -456,6 +500,7 @@
                 <label for="productPrice">
                   Цена за единицу, ₽
                 </label>
+
                 <input id="productPrice"
                        type="number"
                        min="1"
@@ -464,10 +509,12 @@
                        inputmode="numeric"
                        required>
               </div>
+
               <div>
                 <label for="productSort">
                   Порядок в каталоге
                 </label>
+
                 <input id="productSort"
                        type="number"
                        min="-100000"
@@ -479,11 +526,64 @@
             </div>
 
             <label for="productDescription">Описание</label>
+
             <textarea id="productDescription"
                       maxlength="2000"
                       placeholder="Особенности товара, состав, хранение"></textarea>
 
-            <label for="productImage">Ссылка на фотографию</label>
+            <h3 style="margin-top:22px">
+              Фотография товара
+            </h3>
+
+            <div class="photo-box">
+              <img id="photoPreview"
+                   class="photo-preview"
+                   alt="Предпросмотр фотографии товара"
+                   referrerpolicy="no-referrer"
+                   hidden>
+
+              <p id="photoEmpty" class="muted">
+                Фотография пока не выбрана.
+              </p>
+
+              <label for="photoFile">
+                Выбрать фотографию из галереи
+              </label>
+
+              <input id="photoFile"
+                     type="file"
+                     accept="image/jpeg,image/png,image/webp">
+
+              <p class="muted">
+                JPG, PNG или WEBP, не более 5 МБ.
+                Загружайте только фотографии, которые
+                можно публиковать.
+              </p>
+
+              <div class="row">
+                <button id="uploadPhotoButton"
+                        type="button"
+                        disabled>
+                  Загрузить фото
+                </button>
+
+                <button id="removePhotoButton"
+                        class="secondary"
+                        type="button">
+                  Убрать фото
+                </button>
+              </div>
+
+              <p id="photoStatus"
+                 class="muted"
+                 role="status"
+                 aria-live="polite"></p>
+            </div>
+
+            <label for="productImage">
+              Ссылка на фото — заполняется после загрузки
+            </label>
+
             <input id="productImage"
                    type="url"
                    maxlength="1500"
@@ -492,9 +592,9 @@
                    spellcheck="false">
 
             <p class="muted">
-              Пока поддерживается прямая HTTPS-ссылка на изображение.
-              Загрузка фото с телефона ещё не добавлена.
-              Поле можно оставить пустым.
+              Можно также вставить готовую прямую HTTPS-ссылку.
+              После загрузки фотографии обязательно нажмите
+              «Сохранить товар».
             </p>
 
             <label class="check">
@@ -505,14 +605,15 @@
             </label>
 
             <p class="muted">
-              Чтобы временно убрать товар из нового каталога,
-              снимите отметку «Товар в наличии».
+              Если снять отметку, товар исчезнет из
+              доступного покупателям каталога.
             </p>
 
             <div class="row" style="margin-top:18px">
               <button id="saveProductButton" type="submit">
                 Сохранить товар
               </button>
+
               <button id="cancelEditButton"
                       class="secondary"
                       type="button">
@@ -529,6 +630,7 @@
       <section id="ordersSection" hidden>
         <div class="toolbar">
           <h2>Заказы покупателей</h2>
+
           <button id="refreshOrdersButton"
                   class="secondary"
                   type="button">
@@ -537,9 +639,10 @@
         </div>
 
         <div class="notice">
-          Здесь видны заказы, сохранённые после подключения базы.
-          Старые заказы из Telegram автоматически сюда не переносятся.
+          Здесь находятся заказы, сохранённые в базе магазина.
           Статусы пока доступны только продавцу.
+          После изменения статуса покупателю нужно
+          сообщить о нём отдельно.
         </div>
 
         <div id="ordersList"></div>
@@ -568,11 +671,30 @@
 
     const $ = (id) => document.getElementById(id);
 
+    const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+    const ALLOWED_IMAGE_TYPES = [
+      "image/jpeg",
+      "image/png",
+      "image/webp"
+    ];
+
     let token = "";
     let products = [];
     let editingId = null;
     let orderPage = 1;
+
     let sessionVersion = 0;
+    let editorVersion = 0;
+
+    let selectedFile = null;
+    let previewObjectUrl = "";
+
+    let editorBusy = false;
+    let pagingBusy = false;
+    let uploadConfigured = false;
+
+    const activeRequests = new Set();
 
     const money = new Intl.NumberFormat("ru-RU", {
       maximumFractionDigits: 0
@@ -595,6 +717,18 @@
       not_configured: "Telegram не настроен"
     };
 
+    function staleSessionError() {
+      const error = new Error("Сеанс изменился.");
+      error.code = "STALE_SESSION";
+      return error;
+    }
+
+    function ensureSession(version) {
+      if (version !== sessionVersion || !token) {
+        throw staleSessionError();
+      }
+    }
+
     function showMessage(text, error = false) {
       const box = $("message");
       box.textContent = text;
@@ -609,14 +743,24 @@
 
     function reportError(error) {
       if (error.code !== "STALE_SESSION") {
-        showMessage(error.message || "Не удалось выполнить действие.", true);
+        showMessage(
+          error.message || "Не удалось выполнить действие.",
+          true
+        );
       }
     }
 
     function element(tag, text, className) {
       const node = document.createElement(tag);
-      if (text !== undefined) node.textContent = text;
-      if (className) node.className = className;
+
+      if (text !== undefined) {
+        node.textContent = text;
+      }
+
+      if (className) {
+        node.className = className;
+      }
+
       return node;
     }
 
@@ -624,26 +768,146 @@
       return money.format(Number(value) || 0) + " ₽";
     }
 
+    function safeImageUrl(value) {
+      if (!value) return "";
+
+      try {
+        const url = new URL(value);
+
+        if (
+          url.protocol !== "https:" ||
+          url.username ||
+          url.password
+        ) {
+          return "";
+        }
+
+        return url.href;
+      } catch {
+        return "";
+      }
+    }
+
+    function shortOrderName(order) {
+      const number = Number(order.orderNumber);
+
+      return Number.isSafeInteger(number) && number > 0
+        ? "Заказ № " + number
+        : "Заказ без короткого номера";
+    }
+
+    function releasePreviewUrl() {
+      if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+        previewObjectUrl = "";
+      }
+    }
+
+    function resetSelectedFile() {
+      selectedFile = null;
+      $("photoFile").value = "";
+      releasePreviewUrl();
+    }
+
+    function showPreview(address) {
+      const image = $("photoPreview");
+      const empty = $("photoEmpty");
+
+      image.hidden = true;
+      image.removeAttribute("src");
+      empty.hidden = false;
+      empty.textContent = "Фотография пока не выбрана.";
+
+      if (!address) return;
+
+      image.src = address;
+      image.hidden = false;
+      empty.hidden = true;
+    }
+
+    $("photoPreview").addEventListener("error", () => {
+      $("photoPreview").hidden = true;
+      $("photoEmpty").hidden = false;
+      $("photoEmpty").textContent =
+        "Не удалось показать предпросмотр фотографии.";
+    });
+
+    function updateUploadButton() {
+      $("uploadPhotoButton").disabled =
+        editorBusy || !selectedFile || !uploadConfigured;
+    }
+
+    function setEditorBusy(busy) {
+      editorBusy = busy;
+
+      for (
+        const control of
+        $("productForm").querySelectorAll(
+          "input, textarea, select, button"
+        )
+      ) {
+        control.disabled = busy;
+      }
+
+      $("newProductButton").disabled = busy;
+
+      for (
+        const control of
+        document.querySelectorAll("[data-edit-product]")
+      ) {
+        control.disabled = busy;
+      }
+
+      updateUploadButton();
+    }
+
     function logout() {
       sessionVersion += 1;
+      editorVersion += 1;
+
+      for (const controller of activeRequests) {
+        controller.abort();
+      }
+
+      activeRequests.clear();
+
       token = "";
       products = [];
       editingId = null;
+      uploadConfigured = false;
+
+      resetSelectedFile();
 
       $("adminKey").value = "";
       $("productsList").replaceChildren();
       $("ordersList").replaceChildren();
       $("productForm").reset();
+
       $("productEditor").hidden = true;
       $("application").hidden = true;
       $("loginPanel").hidden = false;
+
+      setEditorBusy(false);
       clearMessage();
     }
 
     async function api(route, options = {}) {
       const currentSession = sessionVersion;
+      const currentToken = token;
+
+      ensureSession(currentSession);
+
+      const controller = new AbortController();
+      activeRequests.add(controller);
+
+      const timeout = setTimeout(
+        () => controller.abort(),
+        120000
+      );
+
       const headers = {
-        Authorization: "Bearer " + token
+        Authorization: "Bearer " + currentToken,
+        Accept: "application/json"
       };
 
       const request = {
@@ -651,7 +915,8 @@
         headers,
         credentials: "omit",
         cache: "no-store",
-        signal: AbortSignal.timeout(120000)
+        redirect: "error",
+        signal: controller.signal
       };
 
       if (options.body !== undefined) {
@@ -659,42 +924,54 @@
         request.body = JSON.stringify(options.body);
       }
 
-      let response;
-
       try {
-        response = await fetch(route, request);
-      } catch {
-        if (currentSession !== sessionVersion) {
-          const error = new Error();
-          error.code = "STALE_SESSION";
-          throw error;
+        let response;
+
+        try {
+          response = await fetch(route, request);
+        } catch {
+          ensureSession(currentSession);
+
+          throw new Error(
+            "Нет ответа сервера. Проверьте интернет. " +
+            "После простоя сервер может запускаться " +
+            "около минуты. Если вы сохраняли товар, " +
+            "обновите список и проверьте результат."
+          );
         }
 
-        throw new Error(
-          "Нет ответа сервера. Проверьте интернет. " +
-          "После простоя сервер может запускаться около минуты."
-        );
-      }
+        ensureSession(currentSession);
 
-      if (currentSession !== sessionVersion) {
-        const error = new Error();
-        error.code = "STALE_SESSION";
-        throw error;
-      }
+        let data;
 
-      const data = await response.json().catch(() => ({}));
+        try {
+          data = await response.json();
+        } catch {
+          ensureSession(currentSession);
 
-      if (!response.ok) {
-        if (response.status === 401) {
-          logout();
+          throw new Error(
+            "Сервер вернул неожиданный ответ. " +
+            "Обновите страницу и проверьте результат."
+          );
         }
 
-        throw new Error(
-          data.error || "Ошибка сервера: " + response.status
-        );
-      }
+        ensureSession(currentSession);
 
-      return data;
+        if (!response.ok) {
+          if (response.status === 401) {
+            logout();
+          }
+
+          throw new Error(
+            data.error || "Ошибка сервера: " + response.status
+          );
+        }
+
+        return data;
+      } finally {
+        clearTimeout(timeout);
+        activeRequests.delete(controller);
+      }
     }
 
     function setTab(tab) {
@@ -702,29 +979,55 @@
 
       $("productsSection").hidden = !isProducts;
       $("ordersSection").hidden = isProducts;
-      $("productsTab").classList.toggle("active", isProducts);
-      $("ordersTab").classList.toggle("active", !isProducts);
+
+      $("productsTab").classList.toggle(
+        "active",
+        isProducts
+      );
+
+      $("ordersTab").classList.toggle(
+        "active",
+        !isProducts
+      );
     }
 
     function openEditor(product = null) {
+      if (editorBusy) return;
+
+      editorVersion += 1;
       editingId = product ? product.id : null;
 
+      resetSelectedFile();
       $("productForm").reset();
+
       $("editorTitle").textContent =
         product ? "Редактирование товара" : "Новый товар";
 
       $("productCodeBlock").hidden = !product;
       $("productCode").value = product ? product.id : "";
-      $("productName").value = product ? product.name : "";
+
+      $("productName").value =
+        product ? product.name : "";
+
       $("productCategory").value =
-        product ? product.category : "Рыба и морепродукты";
-      $("productPrice").value = product ? product.priceRub : "";
-      $("productSort").value = product ? product.sortOrder : 0;
+        product
+          ? product.category
+          : "Рыба и морепродукты";
+
+      $("productPrice").value =
+        product ? product.priceRub : "";
+
+      $("productSort").value =
+        product ? product.sortOrder : 0;
+
       $("productDescription").value =
         product ? product.description : "";
-      $("productImage").value = product ? product.imageUrl : "";
+
+      $("productImage").value =
+        product ? product.imageUrl || "" : "";
+
       $("productAvailable").checked =
-        product ? product.available : true;
+        product ? Boolean(product.available) : true;
 
       const unitSelect = $("productUnit");
 
@@ -734,11 +1037,26 @@
 
       const unit = product ? product.unit : "кг";
 
-      if (![...unitSelect.options].some((option) => option.value === unit)) {
+      if (
+        ![...unitSelect.options].some(
+          (option) => option.value === unit
+        )
+      ) {
         unitSelect.add(new Option(unit, unit));
       }
 
       unitSelect.value = unit;
+
+      showPreview(
+        safeImageUrl($("productImage").value.trim())
+      );
+
+      $("photoStatus").textContent = uploadConfigured
+        ? "Выберите фото, затем нажмите «Загрузить фото»."
+        : "Загрузка отключена: проверьте настройки " +
+          "Cloudinary на сервере.";
+
+      setEditorBusy(false);
 
       $("productEditor").hidden = false;
       $("productEditor").scrollIntoView({
@@ -755,34 +1073,34 @@
         "Всего товаров: " + products.length;
 
       if (!products.length) {
-        list.append(element("p", "В каталоге пока нет товаров.", "muted"));
+        list.append(
+          element(
+            "p",
+            "В каталоге пока нет товаров.",
+            "muted"
+          )
+        );
         return;
       }
 
       for (const product of products) {
         const card = element("article", undefined, "card");
+        const imageUrl = safeImageUrl(product.imageUrl);
 
-        if (product.imageUrl) {
-          try {
-            const url = new URL(product.imageUrl);
+        if (imageUrl) {
+          const image = document.createElement("img");
 
-            if (url.protocol === "https:") {
-              const image = document.createElement("img");
-              image.src = url.href;
-              image.alt = product.name;
-              image.className = "product-image";
-              image.loading = "lazy";
-              image.referrerPolicy = "no-referrer";
+          image.src = imageUrl;
+          image.alt = product.name;
+          image.className = "product-image";
+          image.loading = "lazy";
+          image.referrerPolicy = "no-referrer";
 
-              image.addEventListener("error", () => {
-                image.remove();
-              });
+          image.addEventListener("error", () => {
+            image.remove();
+          });
 
-              card.append(image);
-            }
-          } catch {
-            // Некорректная ссылка не мешает показать товар.
-          }
+          card.append(image);
         }
 
         card.append(
@@ -795,32 +1113,54 @@
           ),
           element(
             "span",
-            product.available ? "В наличии" : "Нет в наличии",
+            product.available
+              ? "В наличии"
+              : "Нет в наличии",
             product.available ? "badge" : "badge off"
           )
         );
 
         if (product.description) {
-          card.append(element("p", product.description, "muted"));
+          card.append(
+            element("p", product.description, "muted")
+          );
         }
 
-        const button = element(
+        const edit = element(
           "button",
           "Редактировать",
           "secondary wide"
         );
 
-        button.type = "button";
-        button.addEventListener("click", () => openEditor(product));
-        card.append(button);
+        edit.type = "button";
+        edit.dataset.editProduct = "true";
+        edit.disabled = editorBusy;
+
+        edit.addEventListener(
+          "click",
+          () => openEditor(product)
+        );
+
+        card.append(edit);
         list.append(card);
       }
     }
 
     async function loadProducts() {
       const data = await api("/api/admin/products");
+
+      if (!Array.isArray(data.products)) {
+        throw new Error("Сервер вернул некорректный каталог.");
+      }
+
       products = data.products;
       renderProducts();
+    }
+
+    async function loadConfiguration() {
+      const data = await api("/api/admin/config");
+      uploadConfigured = data.imageUploadConfigured === true;
+      updateUploadButton();
     }
 
     function renderOrders(orders) {
@@ -829,23 +1169,34 @@
 
       if (!orders.length) {
         list.append(
-          element("p", "На этой странице заказов пока нет.", "muted")
+          element(
+            "p",
+            "На этой странице заказов пока нет.",
+            "muted"
+          )
         );
       }
 
       for (const order of orders) {
         const card = element("article", undefined, "card");
+        const orderName = shortOrderName(order);
 
-        const date = new Date(order.createdAt).toLocaleString("ru-RU");
+        const date = new Date(
+          order.createdAt
+        ).toLocaleString("ru-RU");
 
         card.append(
-          element("div", order.id, "order-id"),
+          element("div", orderName, "order-id"),
           element("p", date, "muted"),
           element("h3", order.name)
         );
 
         const phone = element("a", order.phone);
-        phone.href = "tel:" + order.phone;
+        const phoneDigits = String(
+          order.phone || ""
+        ).replace(/\D/g, "");
+
+        phone.href = "tel:+" + phoneDigits;
         card.append(phone);
 
         card.append(
@@ -857,22 +1208,32 @@
           )
         );
 
-        const items = element("ul", undefined, "order-items");
+        const items = element(
+          "ul",
+          undefined,
+          "order-items"
+        );
 
-        for (const item of order.items) {
+        for (const item of order.items || []) {
           items.append(
             element(
               "li",
               item.name + " — " +
               item.quantity + " " + item.unit + " × " +
-              rub(item.priceRub) + " = " + rub(item.totalRub)
+              rub(item.priceRub) + " = " +
+              rub(item.totalRub)
             )
           );
         }
 
         card.append(items);
+
         card.append(
-          element("div", "Товары: " + rub(order.totalRub), "price")
+          element(
+            "div",
+            "Товары: " + rub(order.totalRub),
+            "price"
+          )
         );
 
         if (order.fulfillment === "delivery") {
@@ -880,8 +1241,9 @@
             element(
               "p",
               order.totalRub >= 2000
-                ? "Бесплатная доставка по Макеевке, Донецку и " +
-                  "Харцызску. Другие города — по согласованию."
+                ? "Бесплатная доставка по Макеевке, " +
+                  "Донецку и Харцызску. Другие города " +
+                  "— по согласованию."
                 : "Стоимость доставки необходимо согласовать.",
               "muted"
             )
@@ -889,7 +1251,12 @@
         }
 
         if (order.comment) {
-          card.append(element("p", "Комментарий: " + order.comment));
+          card.append(
+            element(
+              "p",
+              "Комментарий: " + order.comment
+            )
+          );
         }
 
         card.append(
@@ -901,17 +1268,33 @@
           )
         );
 
-        const controls = element("div", undefined, "status-row");
-        const select = document.createElement("select");
-        select.setAttribute("aria-label", "Статус заказа " + order.id);
+        const controls = element(
+          "div",
+          undefined,
+          "status-row"
+        );
 
-        for (const [value, name] of Object.entries(statusNames)) {
+        const select = document.createElement("select");
+
+        select.setAttribute(
+          "aria-label",
+          "Статус: " + orderName
+        );
+
+        for (
+          const [value, name] of
+          Object.entries(statusNames)
+        ) {
           select.add(new Option(name, value));
         }
 
         select.value = order.status;
 
-        const save = element("button", "Сохранить статус");
+        const save = element(
+          "button",
+          "Сохранить статус"
+        );
+
         save.type = "button";
 
         save.addEventListener("click", async () => {
@@ -922,19 +1305,29 @@
           try {
             const result = await api(
               "/api/admin/orders/" +
-                encodeURIComponent(order.id) +
-                "/status",
+              encodeURIComponent(order.id) +
+              "/status",
               {
                 method: "PATCH",
-                body: { status: select.value }
+                body: {
+                  status: select.value
+                }
               }
             );
+
+            if (!result.order) {
+              throw new Error(
+                "Нет подтверждения изменения статуса. " +
+                "Обновите список заказов."
+              );
+            }
 
             order.status = result.order.status;
             select.value = order.status;
 
             showMessage(
-              "Статус заказа сохранён: " + statusNames[order.status]
+              orderName + ": " +
+              (statusNames[order.status] || order.status)
             );
           } catch (error) {
             select.value = order.status;
@@ -947,16 +1340,44 @@
 
         controls.append(select, save);
         card.append(controls);
+
+        const technical = element("details");
+        technical.style.marginTop = "14px";
+
+        technical.append(
+          element(
+            "summary",
+            "Технический идентификатор",
+            "muted"
+          ),
+          element("p", order.id, "muted")
+        );
+
+        card.append(technical);
         list.append(card);
       }
 
-      $("pageLabel").textContent = "Страница " + orderPage;
-      $("previousPageButton").disabled = orderPage <= 1;
-      $("nextPageButton").disabled = orders.length < 50;
+      $("pageLabel").textContent =
+        "Страница " + orderPage;
+
+      $("previousPageButton").disabled =
+        orderPage <= 1;
+
+      $("nextPageButton").disabled =
+        orders.length < 50;
     }
 
     async function loadOrders() {
-      const data = await api("/api/admin/orders?page=" + orderPage);
+      const data = await api(
+        "/api/admin/orders?page=" + orderPage
+      );
+
+      if (!Array.isArray(data.orders)) {
+        throw new Error(
+          "Сервер вернул некорректный список заказов."
+        );
+      }
+
       renderOrders(data.orders);
     }
 
@@ -973,32 +1394,295 @@
       }
     }
 
-    $("loginForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
 
-      await withButton($("loginButton"), async () => {
-        token = $("adminKey").value.trim();
+        reader.onload = () => {
+          const result = String(reader.result || "");
+          const comma = result.indexOf(",");
 
-        if (token.length < 32) {
-          token = "";
-          throw new Error("Ключ должен содержать не менее 32 символов.");
-        }
+          if (comma < 0) {
+            reject(new Error(
+              "Не удалось прочитать фотографию."
+            ));
+            return;
+          }
 
-        try {
-          await loadProducts();
-        } catch (error) {
-          token = "";
-          throw error;
-        }
+          resolve(result.slice(comma + 1));
+        };
 
-        $("adminKey").value = "";
-        $("loginPanel").hidden = true;
-        $("application").hidden = false;
-        setTab("products");
+        reader.onerror = () => {
+          reject(new Error(
+            "Не удалось прочитать файл. " +
+            "Выберите фотографию заново."
+          ));
+        };
+
+        reader.onabort = () => {
+          reject(new Error(
+            "Чтение фотографии прервано."
+          ));
+        };
+
+        reader.readAsDataURL(file);
       });
+    }
+
+    $("photoFile").addEventListener("change", () => {
+      if (editorBusy) return;
+
+      clearMessage();
+      releasePreviewUrl();
+      selectedFile = null;
+
+      const file = $("photoFile").files[0];
+
+      if (!file) {
+        showPreview(
+          safeImageUrl($("productImage").value.trim())
+        );
+        updateUploadButton();
+        return;
+      }
+
+      if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+        $("photoFile").value = "";
+
+        showPreview(
+          safeImageUrl($("productImage").value.trim())
+        );
+
+        $("photoStatus").textContent =
+          "Выберите файл JPG, PNG или WEBP.";
+
+        showMessage(
+          "Этот формат не поддерживается. " +
+          "Используйте JPG, PNG или WEBP.",
+          true
+        );
+
+        updateUploadButton();
+        return;
+      }
+
+      if (file.size <= 0 || file.size > MAX_IMAGE_BYTES) {
+        $("photoFile").value = "";
+
+        showPreview(
+          safeImageUrl($("productImage").value.trim())
+        );
+
+        $("photoStatus").textContent =
+          "Фотография должна быть не больше 5 МБ.";
+
+        showMessage(
+          "Файл слишком большой или пустой. " +
+          "Выберите фотографию размером до 5 МБ.",
+          true
+        );
+
+        updateUploadButton();
+        return;
+      }
+
+      selectedFile = file;
+      previewObjectUrl = URL.createObjectURL(file);
+      showPreview(previewObjectUrl);
+
+      $("photoStatus").textContent =
+        "Выбрано: " + file.name + "\n" +
+        "Нажмите «Загрузить фото», затем " +
+        "«Сохранить товар».";
+
+      updateUploadButton();
     });
 
-    $("logoutButton").addEventListener("click", logout);
+    $("uploadPhotoButton").addEventListener(
+      "click",
+      async () => {
+        if (editorBusy || !selectedFile) return;
+
+        if (!uploadConfigured) {
+          showMessage(
+            "Хранилище фотографий не настроено.",
+            true
+          );
+          return;
+        }
+
+        const currentSession = sessionVersion;
+        const currentEditor = editorVersion;
+        const file = selectedFile;
+
+        clearMessage();
+        setEditorBusy(true);
+
+        $("uploadPhotoButton").textContent =
+          "Загружаем…";
+
+        $("photoStatus").textContent =
+          "Загрузка фотографии. Не закрывайте страницу.";
+
+        try {
+          const base64 = await readFileAsBase64(file);
+
+          ensureSession(currentSession);
+
+          if (currentEditor !== editorVersion) {
+            throw staleSessionError();
+          }
+
+          const result = await api(
+            "/api/admin/images",
+            {
+              method: "POST",
+              body: {
+                mimeType: file.type,
+                base64
+              }
+            }
+          );
+
+          ensureSession(currentSession);
+
+          if (currentEditor !== editorVersion) {
+            throw staleSessionError();
+          }
+
+          const imageUrl = safeImageUrl(result.imageUrl);
+
+          if (!imageUrl) {
+            throw new Error(
+              "Сервер не вернул ссылку на фотографию."
+            );
+          }
+
+          $("productImage").value = imageUrl;
+
+          resetSelectedFile();
+          showPreview(imageUrl);
+
+          $("photoStatus").textContent =
+            "Фото загружено в хранилище. " +
+            "Теперь нажмите «Сохранить товар».";
+
+          showMessage(
+            "Фотография загружена. " +
+            "Осталось сохранить товар."
+          );
+        } catch (error) {
+          if (
+            currentSession === sessionVersion &&
+            currentEditor === editorVersion
+          ) {
+            $("photoStatus").textContent =
+              "Загрузка не подтверждена. " +
+              "Проверьте сообщение об ошибке.";
+          }
+
+          reportError(error);
+        } finally {
+          if (
+            currentSession === sessionVersion &&
+            currentEditor === editorVersion
+          ) {
+            $("uploadPhotoButton").textContent =
+              "Загрузить фото";
+
+            setEditorBusy(false);
+          }
+        }
+      }
+    );
+
+    $("removePhotoButton").addEventListener("click", () => {
+      if (editorBusy) return;
+
+      resetSelectedFile();
+      $("productImage").value = "";
+      showPreview("");
+
+      $("photoStatus").textContent =
+        "Фото убрано из формы. " +
+        "Нажмите «Сохранить товар», чтобы убрать " +
+        "его из каталога. Сам файл в Cloudinary " +
+        "автоматически не удаляется.";
+
+      updateUploadButton();
+    });
+
+    $("productImage").addEventListener("change", () => {
+      if (editorBusy) return;
+
+      resetSelectedFile();
+
+      const value = $("productImage").value.trim();
+      const url = safeImageUrl(value);
+
+      showPreview(url);
+
+      $("photoStatus").textContent =
+        value && !url
+          ? "Нужна обычная HTTPS-ссылка на изображение."
+          : "Нажмите «Сохранить товар», " +
+            "чтобы применить ссылку.";
+
+      updateUploadButton();
+    });
+
+    $("loginForm").addEventListener(
+      "submit",
+      async (event) => {
+        event.preventDefault();
+
+        await withButton($("loginButton"), async () => {
+          const supplied = $("adminKey").value.trim();
+
+          if (supplied.length < 32) {
+            throw new Error(
+              "Ключ должен содержать " +
+              "не менее 32 символов."
+            );
+          }
+
+          sessionVersion += 1;
+          const currentSession = sessionVersion;
+          token = supplied;
+
+          try {
+            await loadProducts();
+            await loadConfiguration();
+            ensureSession(currentSession);
+          } catch (error) {
+            if (currentSession === sessionVersion) {
+              token = "";
+            }
+            throw error;
+          }
+
+          $("adminKey").value = "";
+          $("loginPanel").hidden = true;
+          $("application").hidden = false;
+
+          setTab("products");
+
+          if (!uploadConfigured) {
+            showMessage(
+              "Вход выполнен, но загрузка фото " +
+              "не настроена. Проверьте переменные " +
+              "Cloudinary в Render.",
+              true
+            );
+          }
+        });
+      }
+    );
+
+    $("logoutButton").addEventListener(
+      "click",
+      logout
+    );
 
     $("productsTab").addEventListener("click", () => {
       clearMessage();
@@ -1008,9 +1692,10 @@
     $("ordersTab").addEventListener("click", async () => {
       setTab("orders");
 
-      await withButton($("ordersTab"), async () => {
-        await loadOrders();
-      });
+      await withButton(
+        $("ordersTab"),
+        loadOrders
+      );
     });
 
     $("newProductButton").addEventListener("click", () => {
@@ -1019,82 +1704,189 @@
     });
 
     $("cancelEditButton").addEventListener("click", () => {
+      if (editorBusy) return;
+
+      editorVersion += 1;
       editingId = null;
+      resetSelectedFile();
       $("productEditor").hidden = true;
     });
 
-    $("refreshProductsButton").addEventListener("click", async () => {
-      await withButton($("refreshProductsButton"), loadProducts);
-    });
+    $("refreshProductsButton").addEventListener(
+      "click",
+      async () => {
+        await withButton(
+          $("refreshProductsButton"),
+          loadProducts
+        );
+      }
+    );
 
-    $("productForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
+    $("productForm").addEventListener(
+      "submit",
+      async (event) => {
+        event.preventDefault();
 
-      await withButton($("saveProductButton"), async () => {
-        const imageUrl = $("productImage").value.trim();
+        if (editorBusy) return;
 
-        if (imageUrl) {
-          let valid = false;
+        clearMessage();
 
-          try {
-            valid = new URL(imageUrl).protocol === "https:";
-          } catch {
-            valid = false;
-          }
-
-          if (!valid) {
-            throw new Error("Ссылка на фото должна начинаться с https://");
-          }
-        }
-
-               const body = {
-          name: $("productName").value.trim(),
-          category: $("productCategory").value.trim(),
-          priceRub: Number($("productPrice").value),
-          unit: $("productUnit").value,
-          description: $("productDescription").value.trim(),
-          imageUrl,
-          available: $("productAvailable").checked,
-          sortOrder: Number($("productSort").value)
-        };
-
-        const route = editingId
-          ? "/api/admin/products/" + encodeURIComponent(editingId)
-          : "/api/admin/products";
-
-        await api(route, {
-          method: editingId ? "PUT" : "POST",
-          body
-        });
-
-        editingId = null;
-        $("productEditor").hidden = true;
-
-        showMessage("Товар сохранён в базе магазина.");
-
-        try {
-          await loadProducts();
-        } catch (error) {
+        if (selectedFile) {
           showMessage(
-            "Товар сохранён, но список не обновился. " +
-            "Нажмите «Обновить». " + error.message,
+            "Сначала нажмите «Загрузить фото». " +
+            "Затем сохраните товар.",
             true
           );
+          return;
         }
-      });
-    });
 
-    $("refreshOrdersButton").addEventListener("click", async () => {
-      await withButton($("refreshOrdersButton"), loadOrders);
-    });
+        const imageValue = $("productImage").value.trim();
+        const imageUrl = safeImageUrl(imageValue);
 
-    let pagingBusy = false;
+        if (imageValue && !imageUrl) {
+          showMessage(
+            "Ссылка на фото должна начинаться с https:// " +
+            "и не содержать логин или пароль.",
+            true
+          );
+          return;
+        }
+
+        const priceRub = Number(
+          $("productPrice").value
+        );
+
+        const sortOrder = Number(
+          $("productSort").value
+        );
+
+        if (
+          !Number.isInteger(priceRub) ||
+          priceRub < 1 ||
+          priceRub > 1000000
+        ) {
+          showMessage(
+            "Цена должна быть целым числом " +
+            "от 1 до 1 000 000.",
+            true
+          );
+          return;
+        }
+
+        if (
+          !Number.isInteger(sortOrder) ||
+          sortOrder < -100000 ||
+          sortOrder > 100000
+        ) {
+          showMessage(
+            "Проверьте порядок сортировки.",
+            true
+          );
+          return;
+        }
+
+        const body = {
+          name: $("productName").value.trim(),
+          category: $("productCategory").value.trim(),
+          priceRub,
+          unit: $("productUnit").value,
+          description:
+            $("productDescription").value.trim(),
+          imageUrl,
+          available: $("productAvailable").checked,
+          sortOrder
+        };
+
+        if (body.name.length < 2) {
+          showMessage(
+            "Введите название от 2 символов.",
+            true
+          );
+          return;
+        }
+
+        const id = editingId;
+
+        const route = id
+          ? "/api/admin/products/" +
+            encodeURIComponent(id)
+          : "/api/admin/products";
+
+        const currentSession = sessionVersion;
+        const currentEditor = editorVersion;
+
+        setEditorBusy(true);
+        $("saveProductButton").textContent =
+          "Сохраняем…";
+
+        try {
+          await api(route, {
+            method: id ? "PUT" : "POST",
+            body
+          });
+
+          ensureSession(currentSession);
+
+          if (currentEditor !== editorVersion) {
+            throw staleSessionError();
+          }
+
+          editingId = null;
+          resetSelectedFile();
+          $("productEditor").hidden = true;
+
+          showMessage(
+            "Товар сохранён в базе магазина. " +
+            "Обновите каталог в приложении."
+          );
+
+          try {
+            await loadProducts();
+          } catch (error) {
+            if (error.code === "STALE_SESSION") {
+              throw error;
+            }
+
+            showMessage(
+              "Товар сохранён, но список не обновился. " +
+              "Нажмите «Обновить». " + error.message,
+              true
+            );
+          }
+        } catch (error) {
+          reportError(error);
+        } finally {
+          if (
+            currentSession === sessionVersion &&
+            currentEditor === editorVersion
+          ) {
+            $("saveProductButton").textContent =
+              "Сохранить товар";
+
+            setEditorBusy(false);
+          }
+        }
+      }
+    );
+
+    $("refreshOrdersButton").addEventListener(
+      "click",
+      async () => {
+        await withButton(
+          $("refreshOrdersButton"),
+          loadOrders
+        );
+      }
+    );
 
     async function changePage(delta) {
       if (pagingBusy) return;
 
       pagingBusy = true;
+
       const previous = orderPage;
+      const currentSession = sessionVersion;
+
       orderPage = Math.max(1, orderPage + delta);
 
       $("previousPageButton").disabled = true;
@@ -1104,23 +1896,36 @@
         clearMessage();
         await loadOrders();
       } catch (error) {
-        orderPage = previous;
-        $("previousPageButton").disabled = orderPage <= 1;
-        $("nextPageButton").disabled = false;
+        if (currentSession === sessionVersion) {
+          orderPage = previous;
+
+          $("previousPageButton").disabled =
+            orderPage <= 1;
+
+          $("nextPageButton").disabled = false;
+        }
+
         reportError(error);
       } finally {
         pagingBusy = false;
       }
     }
 
-    $("previousPageButton").addEventListener("click", () => {
-      changePage(-1);
-    });
+    $("previousPageButton").addEventListener(
+      "click",
+      () => changePage(-1)
+    );
 
-    $("nextPageButton").addEventListener("click", () => {
-      changePage(1);
-    });
+    $("nextPageButton").addEventListener(
+      "click",
+      () => changePage(1)
+    );
+
+    window.addEventListener(
+      "beforeunload",
+      releasePreviewUrl
+    );
   </script>
 </body>
 </html>
- 
+<!-- КОНЕЦ ФАЙЛА -->
