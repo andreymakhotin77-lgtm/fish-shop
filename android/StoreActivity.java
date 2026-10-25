@@ -1436,13 +1436,25 @@ public class StoreActivity extends Activity {
     private void showProduct(Product p) {
         if (destroyed || isFinishing()) return;
 
+        final int step = kg(p) ? 1 : 2;
+        final int[] selected = {step};
+
         ScrollView body = new ScrollView(this);
+        body.setFillViewport(true);
+
         LinearLayout detail = box(false);
 
-        detail.addView(
-                new ProductPhoto(this, p.name, p.category, p.imageUrl),
-                new LinearLayout.LayoutParams(-1, dp(240))
+        ProductPhoto photo = new ProductPhoto(
+                this, p.name, p.category, p.imageUrl
         );
+        photo.setContentDescription(
+                "Фото товара: " + p.name
+        );
+        detail.addView(
+                photo,
+                new LinearLayout.LayoutParams(-1, dp(250))
+        );
+
         badge(detail, p);
         detail.addView(text(p.category, 12, MUTED));
         detail.addView(bold(p.name, 24, WHITE));
@@ -1450,33 +1462,235 @@ public class StoreActivity extends Activity {
 
         if (kg(p)) {
             detail.addView(text(
-                    "500 г — " + money((long) p.price * 50), 16, GOLD
+                    "500 г — " + money((long) p.price * 50),
+                    15, GOLD
+            ));
+        }
+
+        detail.addView(bold("Описание", 18, WHITE));
+        detail.addView(text(
+                p.description.isEmpty()
+                        ? "Описание пока не добавлено. " +
+                          "Подробности можно уточнить у магазина."
+                        : p.description,
+                15, WHITE
+        ));
+
+        detail.addView(bold(
+                "Количество для добавления", 18, WHITE
+        ));
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button minus = secondary("−", () -> {});
+        Button plus = button("+", () -> {});
+
+        minus.setContentDescription(
+                "Уменьшить количество товара " + p.name
+        );
+        plus.setContentDescription(
+                "Увеличить количество товара " + p.name
+        );
+
+        for (Button control : new Button[]{minus, plus}) {
+            control.setPadding(0, 0, 0, 0);
+        }
+
+        TextView count = bold("", 19, WHITE);
+        count.setGravity(Gravity.CENTER);
+
+        controls.addView(
+                minus,
+                new LinearLayout.LayoutParams(dp(52), dp(48))
+        );
+        controls.addView(
+                count,
+                new LinearLayout.LayoutParams(0, -2, 1)
+        );
+        controls.addView(
+                plus,
+                new LinearLayout.LayoutParams(dp(52), dp(48))
+        );
+        detail.addView(controls);
+
+        TextView selectedTotal = bold("", 23, GOLD);
+        detail.addView(selectedTotal);
+
+        TextView alreadyInCart = text("", 13, MUTED);
+        detail.addView(alreadyInCart);
+
+        if (kg(p)) {
+            detail.addView(text(
+                    "Выбор с шагом 500 г. " +
+                    "Указанное количество будет добавлено " +
+                    "к уже находящемуся в корзине.",
+                    12, MUTED
+            ));
+        } else {
+            detail.addView(text(
+                    "Указанное количество будет добавлено " +
+                    "к уже находящемуся в корзине.",
+                    12, MUTED
             ));
         }
 
         detail.addView(text(
-                p.description.isEmpty()
-                        ? "Подробности уточняйте у магазина."
-                        : p.description,
-                16, WHITE
+                "Оплата при получении.",
+                13, MUTED
         ));
-        detail.addView(text("Оплата при получении.", 13, MUTED));
+
         body.addView(detail);
 
         AlertDialog dialog = dialogBuilder()
                 .setView(body)
                 .setNegativeButton("Закрыть", null)
-                .setPositiveButton(
-                        kg(p) ? "Добавить 500 г" : "Добавить 1 " + p.unit,
-                        null
-                )
+                .setPositiveButton("Добавить в корзину", null)
                 .create();
+
         dialog.show();
         decorate(dialog);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-                .setOnClickListener(v -> {
-                    if (changeQuantity(p, 1)) dialog.dismiss();
-                });
+
+        Button add = dialog.getButton(
+                AlertDialog.BUTTON_POSITIVE
+        );
+
+        Runnable update = () -> {
+            int current = halves(p.id);
+
+            count.setText(quantity(p, selected[0]));
+
+            long amount =
+                    (long) p.price * 50L * selected[0];
+            selectedTotal.setText(
+                    "За выбранное: " + money(amount)
+            );
+
+            alreadyInCart.setText(
+                    current > 0
+                            ? "Уже в корзине: " +
+                              quantity(p, current)
+                            : "Этого товара пока нет в корзине."
+            );
+
+            boolean available =
+                    !busyCart() &&
+                    freshCatalog &&
+                    !loadingCatalog &&
+                    findProduct(p.id) == p;
+
+            boolean validCurrent =
+                    kg(p) || current % 2 == 0;
+
+            minus.setEnabled(
+                    available && selected[0] > step
+            );
+
+            plus.setEnabled(
+                    available &&
+                    validCurrent &&
+                    current + selected[0] + step <= 100
+            );
+
+            add.setEnabled(
+                    available &&
+                    validCurrent &&
+                    current + selected[0] <= 100
+            );
+
+            if (!available) {
+                alreadyInCart.setText(
+                        "Добавление сейчас недоступно. " +
+                        "Дождитесь завершения проверки заказа " +
+                        "или обновления каталога и откройте " +
+                        "карточку заново."
+                );
+            } else if (!validCurrent) {
+                alreadyInCart.setText(
+                        "Единица продажи изменилась. " +
+                        "Исправьте количество в корзине " +
+                        "кнопкой «+» или «−»."
+                );
+            } else if (current + selected[0] > 100) {
+                alreadyInCart.setText(
+                        "Лимит в корзине — 50 " +
+                        p.unit + " этого товара."
+                );
+            }
+        };
+
+        minus.setOnClickListener(view -> {
+            if (selected[0] > step) {
+                selected[0] -= step;
+            }
+            update.run();
+        });
+
+        plus.setOnClickListener(view -> {
+            if (halves(p.id) + selected[0] + step <= 100) {
+                selected[0] += step;
+            }
+            update.run();
+        });
+
+        add.setOnClickListener(view -> {
+            if (busyCart()) {
+                message(
+                        "Корзина",
+                        "Сначала завершите проверку " +
+                        "неподтверждённого заказа."
+                );
+                return;
+            }
+
+            if (!freshCatalog ||
+                    loadingCatalog ||
+                    findProduct(p.id) != p) {
+                dialog.dismiss();
+                message(
+                        "Обновите товар",
+                        "Каталог изменился или ещё загружается. " +
+                        "Откройте карточку заново после обновления."
+                );
+                return;
+            }
+
+            int current = halves(p.id);
+
+            if (!kg(p) && current % 2 != 0) {
+                message(
+                        "Количество",
+                        "Единица продажи изменилась. " +
+                        "Исправьте количество в корзине " +
+                        "кнопкой «+» или «−»."
+                );
+                return;
+            }
+
+            int next = current + selected[0];
+
+            if (next > 100) {
+                message(
+                        "Количество",
+                        "В корзине можно выбрать до 50 " +
+                        p.unit + " этого товара."
+                );
+                return;
+            }
+
+            cart.put(p.id, next);
+            saveCart();
+            dialog.dismiss();
+            redraw();
+
+            Toast.makeText(
+                    StoreActivity.this,
+                    "Добавлено: " + quantity(p, selected[0]),
+                    Toast.LENGTH_SHORT
+            ).show();
+        });
+
+        update.run();
     }
 
     private void quantityControls(LinearLayout parent, Product p) {
@@ -2129,11 +2343,11 @@ public class StoreActivity extends Activity {
             );
         }));
 
-        LinearLayout shop = panel();
-        shop.addView(bold("Лавка Вкуса", 21, GOLD));
-        shop.addView(text(PICKUP, 15, WHITE));
-        shop.addView(text(DELIVERY, 13, MUTED));
-        shop.addView(text(
+        ShopContacts.addTo(this, content);
+
+        LinearLayout conditions = panel();
+        conditions.addView(text(DELIVERY, 13, MUTED));
+        conditions.addView(text(
                 "Даты и интервалы — по московскому времени. " +
                 "Детали заказа подтверждает продавец.",
                 13, MUTED
