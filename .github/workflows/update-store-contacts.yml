@@ -1,0 +1,435 @@
+name: Update store contacts and product details
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update application safely
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          path = Path("android/StoreActivity.java")
+          contacts_path = Path("android/ShopContacts.java")
+
+          if not path.is_file():
+              raise SystemExit(
+                  "Не найден android/StoreActivity.java. "
+                  "Файлы не изменены."
+              )
+
+          if not contacts_path.is_file():
+              raise SystemExit(
+                  "Не найден android/ShopContacts.java. "
+                  "Сначала добавьте файл контактов."
+              )
+
+          contacts = contacts_path.read_text(encoding="utf-8")
+
+          if "class ShopContacts" not in contacts:
+              raise SystemExit(
+                  "В ShopContacts.java нет класса ShopContacts. "
+                  "Файлы не изменены."
+              )
+
+          original = path.read_text(encoding="utf-8")
+          source = original
+
+          start_marker = "    private void showProduct(Product p) {"
+          end_marker = "    private void quantityControls("
+
+          if source.count(start_marker) != 1:
+              raise SystemExit(
+                  "Не удалось однозначно найти showProduct. "
+                  "Файлы не изменены."
+              )
+
+          if source.count(end_marker) != 1:
+              raise SystemExit(
+                  "Не удалось однозначно найти quantityControls. "
+                  "Файлы не изменены."
+              )
+
+          start = source.index(start_marker)
+          end = source.index(end_marker)
+
+          if end <= start:
+              raise SystemExit(
+                  "Неожиданный порядок методов. "
+                  "Файлы не изменены."
+              )
+
+          new_method = textwrap.dedent(r'''
+          private void showProduct(Product p) {
+              if (destroyed || isFinishing()) return;
+
+              final int step = kg(p) ? 1 : 2;
+              final int[] selected = {step};
+
+              ScrollView body = new ScrollView(this);
+              body.setFillViewport(true);
+
+              LinearLayout detail = box(false);
+
+              ProductPhoto photo = new ProductPhoto(
+                      this, p.name, p.category, p.imageUrl
+              );
+              photo.setContentDescription(
+                      "Фото товара: " + p.name
+              );
+              detail.addView(
+                      photo,
+                      new LinearLayout.LayoutParams(-1, dp(250))
+              );
+
+              badge(detail, p);
+              detail.addView(text(p.category, 12, MUTED));
+              detail.addView(bold(p.name, 24, WHITE));
+              prices(detail, p, 25);
+
+              if (kg(p)) {
+                  detail.addView(text(
+                          "500 г — " + money((long) p.price * 50),
+                          15, GOLD
+                  ));
+              }
+
+              detail.addView(bold("Описание", 18, WHITE));
+              detail.addView(text(
+                      p.description.isEmpty()
+                              ? "Описание пока не добавлено. " +
+                                "Подробности можно уточнить у магазина."
+                              : p.description,
+                      15, WHITE
+              ));
+
+              detail.addView(bold(
+                      "Количество для добавления", 18, WHITE
+              ));
+
+              LinearLayout controls = new LinearLayout(this);
+              controls.setGravity(Gravity.CENTER_VERTICAL);
+
+              Button minus = secondary("−", () -> {});
+              Button plus = button("+", () -> {});
+
+              minus.setContentDescription(
+                      "Уменьшить количество товара " + p.name
+              );
+              plus.setContentDescription(
+                      "Увеличить количество товара " + p.name
+              );
+
+              for (Button control : new Button[]{minus, plus}) {
+                  control.setPadding(0, 0, 0, 0);
+              }
+
+              TextView count = bold("", 19, WHITE);
+              count.setGravity(Gravity.CENTER);
+
+              controls.addView(
+                      minus,
+                      new LinearLayout.LayoutParams(dp(52), dp(48))
+              );
+              controls.addView(
+                      count,
+                      new LinearLayout.LayoutParams(0, -2, 1)
+              );
+              controls.addView(
+                      plus,
+                      new LinearLayout.LayoutParams(dp(52), dp(48))
+              );
+              detail.addView(controls);
+
+              TextView selectedTotal = bold("", 23, GOLD);
+              detail.addView(selectedTotal);
+
+              TextView alreadyInCart = text("", 13, MUTED);
+              detail.addView(alreadyInCart);
+
+              if (kg(p)) {
+                  detail.addView(text(
+                          "Выбор с шагом 500 г. " +
+                          "Указанное количество будет добавлено " +
+                          "к уже находящемуся в корзине.",
+                          12, MUTED
+                  ));
+              } else {
+                  detail.addView(text(
+                          "Указанное количество будет добавлено " +
+                          "к уже находящемуся в корзине.",
+                          12, MUTED
+                  ));
+              }
+
+              detail.addView(text(
+                      "Оплата при получении.",
+                      13, MUTED
+              ));
+
+              body.addView(detail);
+
+              AlertDialog dialog = dialogBuilder()
+                      .setView(body)
+                      .setNegativeButton("Закрыть", null)
+                      .setPositiveButton("Добавить в корзину", null)
+                      .create();
+
+              dialog.show();
+              decorate(dialog);
+
+              Button add = dialog.getButton(
+                      AlertDialog.BUTTON_POSITIVE
+              );
+
+              Runnable update = () -> {
+                  int current = halves(p.id);
+
+                  count.setText(quantity(p, selected[0]));
+
+                  long amount =
+                          (long) p.price * 50L * selected[0];
+                  selectedTotal.setText(
+                          "За выбранное: " + money(amount)
+                  );
+
+                  alreadyInCart.setText(
+                          current > 0
+                                  ? "Уже в корзине: " +
+                                    quantity(p, current)
+                                  : "Этого товара пока нет в корзине."
+                  );
+
+                  boolean available =
+                          !busyCart() &&
+                          freshCatalog &&
+                          !loadingCatalog &&
+                          findProduct(p.id) == p;
+
+                  boolean validCurrent =
+                          kg(p) || current % 2 == 0;
+
+                  minus.setEnabled(
+                          available && selected[0] > step
+                  );
+
+                  plus.setEnabled(
+                          available &&
+                          validCurrent &&
+                          current + selected[0] + step <= 100
+                  );
+
+                  add.setEnabled(
+                          available &&
+                          validCurrent &&
+                          current + selected[0] <= 100
+                  );
+
+                  if (!available) {
+                      alreadyInCart.setText(
+                              "Добавление сейчас недоступно. " +
+                              "Дождитесь завершения проверки заказа " +
+                              "или обновления каталога и откройте " +
+                              "карточку заново."
+                      );
+                  } else if (!validCurrent) {
+                      alreadyInCart.setText(
+                              "Единица продажи изменилась. " +
+                              "Исправьте количество в корзине " +
+                              "кнопкой «+» или «−»."
+                      );
+                  } else if (current + selected[0] > 100) {
+                      alreadyInCart.setText(
+                              "Лимит в корзине — 50 " +
+                              p.unit + " этого товара."
+                      );
+                  }
+              };
+
+              minus.setOnClickListener(view -> {
+                  if (selected[0] > step) {
+                      selected[0] -= step;
+                  }
+                  update.run();
+              });
+
+              plus.setOnClickListener(view -> {
+                  if (halves(p.id) + selected[0] + step <= 100) {
+                      selected[0] += step;
+                  }
+                  update.run();
+              });
+
+              add.setOnClickListener(view -> {
+                  if (busyCart()) {
+                      message(
+                              "Корзина",
+                              "Сначала завершите проверку " +
+                              "неподтверждённого заказа."
+                      );
+                      return;
+                  }
+
+                  if (!freshCatalog ||
+                          loadingCatalog ||
+                          findProduct(p.id) != p) {
+                      dialog.dismiss();
+                      message(
+                              "Обновите товар",
+                              "Каталог изменился или ещё загружается. " +
+                              "Откройте карточку заново после обновления."
+                      );
+                      return;
+                  }
+
+                  int current = halves(p.id);
+
+                  if (!kg(p) && current % 2 != 0) {
+                      message(
+                              "Количество",
+                              "Единица продажи изменилась. " +
+                              "Исправьте количество в корзине " +
+                              "кнопкой «+» или «−»."
+                      );
+                      return;
+                  }
+
+                  int next = current + selected[0];
+
+                  if (next > 100) {
+                      message(
+                              "Количество",
+                              "В корзине можно выбрать до 50 " +
+                              p.unit + " этого товара."
+                      );
+                      return;
+                  }
+
+                  cart.put(p.id, next);
+                  saveCart();
+                  dialog.dismiss();
+                  redraw();
+
+                  Toast.makeText(
+                          StoreActivity.this,
+                          "Добавлено: " + quantity(p, selected[0]),
+                          Toast.LENGTH_SHORT
+                  ).show();
+              });
+
+              update.run();
+          }
+          ''').strip()
+
+          new_method = textwrap.indent(new_method, "    ") + "\n\n"
+
+          source = source[:start] + new_method + source[end:]
+
+          old_shop = textwrap.dedent(r'''
+          LinearLayout shop = panel();
+          shop.addView(bold("Лавка Вкуса", 21, GOLD));
+          shop.addView(text(PICKUP, 15, WHITE));
+          shop.addView(text(DELIVERY, 13, MUTED));
+          shop.addView(text(
+                  "Даты и интервалы — по московскому времени. " +
+                  "Детали заказа подтверждает продавец.",
+                  13, MUTED
+          ));
+          ''').strip()
+
+          old_shop = textwrap.indent(old_shop, "        ")
+
+          new_shop = textwrap.dedent(r'''
+          ShopContacts.addTo(this, content);
+
+          LinearLayout conditions = panel();
+          conditions.addView(text(DELIVERY, 13, MUTED));
+          conditions.addView(text(
+                  "Даты и интервалы — по московскому времени. " +
+                  "Детали заказа подтверждает продавец.",
+                  13, MUTED
+          ));
+          ''').strip()
+
+          new_shop = textwrap.indent(new_shop, "        ")
+
+          contact_call = "ShopContacts.addTo(this, content);"
+
+          if contact_call not in source:
+              if source.count(old_shop) != 1:
+                  raise SystemExit(
+                      "Блок магазина отличается от ожидаемого. "
+                      "Автоматическая правка остановлена. "
+                      "StoreActivity.java не изменён."
+                  )
+              source = source.replace(old_shop, new_shop, 1)
+          elif source.count(contact_call) != 1:
+              raise SystemExit(
+                  "Найдено несколько подключений контактов. "
+                  "Файл не изменён."
+              )
+
+          required = [
+              'HISTORY_KEY',
+              '"orders_history_v1"',
+              '"pending_order"',
+              '"cart_v2"',
+              '"orderAccessToken"',
+              'private void quantityControls(',
+              'ShopContacts.addTo(this, content);',
+          ]
+
+          for fragment in required:
+              if fragment not in source:
+                  raise SystemExit(
+                      "Проверка структуры не пройдена: " + fragment
+                  )
+
+          if source == original:
+              print("Обновление уже установлено.")
+          else:
+              path.write_text(source, encoding="utf-8")
+              print(
+                  "Готово: обновлены карточка товара "
+                  "и контакты магазина."
+              )
+          PY
+
+      - name: Save application changes
+        shell: bash
+        run: |
+          if git diff --quiet -- android/StoreActivity.java; then
+            echo "Новых изменений нет."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email \
+              "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android/StoreActivity.java
+            git commit -m "Add shop contacts and product quantity selector"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh workflow run build-apk.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
