@@ -1,0 +1,280 @@
+name: Update shop comfort
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update application safely
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          path = Path("android/StoreActivity.java")
+          helper = Path("android/ShopComfort.java")
+
+          if not path.is_file():
+              raise SystemExit(
+                  "Не найден android/StoreActivity.java."
+              )
+
+          if not helper.is_file():
+              raise SystemExit(
+                  "Сначала добавьте android/ShopComfort.java."
+              )
+
+          if "class ShopComfort" not in helper.read_text(
+              encoding="utf-8"
+          ):
+              raise SystemExit(
+                  "Проверьте содержимое ShopComfort.java."
+              )
+
+          original = path.read_text(encoding="utf-8")
+
+          if "private Button comfortCartButton;" in original:
+              print("Улучшения уже подключены.")
+              raise SystemExit(0)
+
+          source = original
+
+          def replace_once(old, new, label):
+              global source
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      "Код отличается от ожидаемого: " + label +
+                      ". Файл не изменён."
+                  )
+              source = source.replace(old, new, 1)
+
+          replace_once(
+              "public class StoreActivity extends Activity {",
+              "public class StoreActivity extends Activity {\n"
+              "    private Button comfortCartButton;\n"
+              "    private Button comfortCitySelector;\n"
+              "    private CheckBox comfortAgreement;\n",
+              "объявление StoreActivity"
+          )
+
+          old_navigation = (
+              "        navigation = new LinearLayout(this);"
+          )
+
+          new_navigation = textwrap.dedent('''
+          comfortCartButton = ShopComfort.cartButton(
+                  this, () -> openTab(3)
+          );
+
+          LinearLayout.LayoutParams comfortParams =
+                  new LinearLayout.LayoutParams(-1, dp(52));
+          comfortParams.setMargins(
+                  dp(16), dp(8), dp(16), dp(8)
+          );
+          root.addView(comfortCartButton, comfortParams);
+
+          navigation = new LinearLayout(this);
+          ''').strip()
+
+          replace_once(
+              old_navigation,
+              textwrap.indent(new_navigation, "        "),
+              "место для закреплённой корзины"
+          )
+
+          replace_once(
+              "        drawNavigation();",
+              "        drawNavigation();\n"
+              "        ShopComfort.updateCart(\n"
+              "                comfortCartButton,\n"
+              "                tab != 3 && "
+              "(!cart.isEmpty() || pending != null),\n"
+              "                freshCatalog && !loadingCatalog,\n"
+              "                cart.size(),\n"
+              "                money(total()),\n"
+              "                pending != null\n"
+              "        );",
+              "обновление нижнего меню"
+          )
+
+          replace_once(
+              "        otherCityInput = null;",
+              "        otherCityInput = null;\n"
+              "        comfortCitySelector = null;\n"
+              "        comfortAgreement = null;",
+              "сброс ссылок при перерисовке"
+          )
+
+          phone_block = textwrap.dedent('''
+          phoneInput = input(
+                  parent, "Телефон: +7…", customerPhone,
+                  InputType.TYPE_CLASS_PHONE, 32
+          );
+          ''').strip()
+
+          phone_block = textwrap.indent(phone_block, "        ")
+
+          replace_once(
+              phone_block,
+              phone_block +
+              "\n        ShopComfort.attachPhone(phoneInput);",
+              "поле телефона"
+          )
+
+          replace_once(
+              "        selector.setEnabled(!busyCart());",
+              "        comfortCitySelector = selector;\n"
+              "        selector.setEnabled(!busyCart());",
+              "выбор города"
+          )
+
+          replace_once(
+              "        CheckBox agreement = new CheckBox(this);",
+              "        CheckBox agreement = new CheckBox(this);\n"
+              "        comfortAgreement = agreement;",
+              "поле согласия"
+          )
+
+          old_message = (
+              "    private void message(String title, String body) {\n"
+              "        if (destroyed || isFinishing()) return;\n"
+          )
+
+          new_message = old_message + (
+              "        if (tab == 3 && "
+              "comfortShowFieldError(title, body)) return;\n"
+          )
+
+          replace_once(
+              old_message,
+              new_message,
+              "показ ошибок формы"
+          )
+
+          error_method = textwrap.dedent('''
+          private boolean comfortShowFieldError(
+                  String title, String explanation
+          ) {
+              TextView target;
+
+              switch (title) {
+                  case "Имя":
+                      target = nameInput;
+                      break;
+
+                  case "Телефон":
+                      target = phoneInput;
+                      break;
+
+                  case "Город":
+                      target = comfortCitySelector;
+                      break;
+
+                  case "Название города":
+                      target = otherCityInput;
+                      break;
+
+                  case "Адрес":
+                      target = addressInput;
+                      break;
+
+                  case "Комментарий":
+                      target = commentInput;
+                      break;
+
+                  case "Согласие":
+                      target = comfortAgreement;
+                      break;
+
+                  default:
+                      return false;
+              }
+
+              return ShopComfort.markError(target, explanation);
+          }
+
+          ''').lstrip("\n")
+
+          marker = (
+              "    private void message(String title, String body) {"
+          )
+
+          replace_once(
+              marker,
+              textwrap.indent(error_method, "    ") + "\n" + marker,
+              "добавление обработки полей"
+          )
+
+          required = [
+              '"orders_history_v1"',
+              '"pending_order"',
+              '"orderAccessToken"',
+              '"cart_v2"',
+              'private void prepareOrder()',
+              'private void loadCatalog()',
+              'ShopComfort.updateCart(',
+              'ShopComfort.attachPhone(phoneInput);',
+              'comfortShowFieldError(',
+          ]
+
+          for fragment in required:
+              if fragment not in source:
+                  raise SystemExit(
+                      "Не пройдена проверка структуры: " + fragment +
+                      ". Файл не изменён."
+                  )
+
+          path.write_text(source, encoding="utf-8")
+
+          print(
+              "Готово: подключены закреплённая корзина, "
+              "форматирование телефона и ошибки полей."
+          )
+          PY
+
+      - name: Save application changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git diff --check
+
+          if git diff --quiet -- android/StoreActivity.java; then
+            echo "Новых изменений нет."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email \
+              "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add android/StoreActivity.java
+            git commit -m "Improve cart navigation and checkout form"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh workflow run build-apk.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
