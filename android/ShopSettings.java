@@ -1,7 +1,7 @@
 package ru.makeevka.fishshop;
 
 import android.app.Activity;
-import android.app.AlertDialog;
+import android.app.Dialog;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
@@ -12,6 +12,10 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.provider.Settings;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -19,27 +23,19 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 /*
- * Экран настроек магазина.
+ * Полноэкранные настройки.
  *
- * Самостоятельно не отключает защиту:
- * проверку владельца выполняет MainActivity.
+ * Сохраняет прежний интерфейс вызова:
+ * show(), dismiss(), protectionEnabled(),
+ * lockAfterMillis(), Actions.
  *
- * История заказов, корзина и ключи просмотра
- * этим классом не изменяются.
+ * Проверку владельца выполняет MainActivity.
+ * Корзина, история и ключи заказов не изменяются.
  */
 public final class ShopSettings {
 
-    // LAVKA_SETTINGS_DIALOG_LIFECYCLE
-    private static AlertDialog activeDialog;
-
-    public static void dismiss() {
-        AlertDialog previous = activeDialog;
-        activeDialog = null;
-
-        if (previous != null && previous.isShowing()) {
-            previous.dismiss();
-        }
-    }
+    // LAVKA_FULLSCREEN_SETTINGS_V1
+    private static Dialog activeDialog;
 
     private static final String PREFS =
             "lavka_device_lock_v1";
@@ -65,11 +61,9 @@ public final class ShopSettings {
     private static final int MUTED =
             Color.rgb(166, 167, 163);
 
-    /*
-     * Действия выполняет Activity:
-     * включение/отключение — с проверкой владельца,
-     * редактирование — в существующем профиле.
-     */
+    private static final int LINE =
+            Color.rgb(53, 53, 48);
+
     public interface Actions {
         void enableProtection();
 
@@ -79,6 +73,15 @@ public final class ShopSettings {
     }
 
     private ShopSettings() {
+    }
+
+    public static void dismiss() {
+        Dialog previous = activeDialog;
+        activeDialog = null;
+
+        if (previous != null && previous.isShowing()) {
+            previous.dismiss();
+        }
     }
 
     private static SharedPreferences preferences(
@@ -120,27 +123,307 @@ public final class ShopSettings {
             Activity activity,
             Actions actions
     ) {
-        if (actions == null ||
-                activity.isFinishing() ||
-                activity.isDestroyed()) {
+        if (actions == null || !usable(activity)) {
             return;
         }
 
+        dismiss();
+
+        Dialog dialog = new Dialog(
+                activity,
+                android.R.style.Theme_Material_NoActionBar
+        );
+
+        dialog.requestWindowFeature(
+                Window.FEATURE_NO_TITLE
+        );
+
+        dialog.setCanceledOnTouchOutside(false);
+
+        LinearLayout root = new LinearLayout(activity);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BLACK);
+        root.setFitsSystemWindows(true);
+
+        dialog.setContentView(
+                root,
+                new android.view.ViewGroup.LayoutParams(
+                        -1,
+                        -1
+                )
+        );
+
+        dialog.setOnDismissListener(ignored -> {
+            if (activeDialog == dialog) {
+                activeDialog = null;
+            }
+        });
+
+        render(
+                activity,
+                actions,
+                dialog,
+                root,
+                false
+        );
+
+        activeDialog = dialog;
+
+        try {
+            dialog.show();
+
+            Window window = dialog.getWindow();
+
+            if (window != null) {
+                window.setBackgroundDrawable(
+                        new android.graphics.drawable.ColorDrawable(
+                                BLACK
+                        )
+                );
+
+                window.getDecorView().setPadding(
+                        0, 0, 0, 0
+                );
+
+                window.setLayout(
+                        WindowManager.LayoutParams.MATCH_PARENT,
+                        WindowManager.LayoutParams.MATCH_PARENT
+                );
+
+                window.addFlags(
+                        WindowManager.LayoutParams
+                                .FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
+                );
+
+                window.setStatusBarColor(BLACK);
+                window.setNavigationBarColor(BLACK);
+                window.getDecorView()
+                        .setSystemUiVisibility(0);
+
+                window.setSoftInputMode(
+                        WindowManager.LayoutParams
+                                .SOFT_INPUT_ADJUST_RESIZE
+                );
+
+                boolean secure =
+                        (activity.getWindow()
+                                .getAttributes().flags &
+                                WindowManager.LayoutParams
+                                        .FLAG_SECURE) != 0;
+
+                if (secure) {
+                    window.addFlags(
+                            WindowManager.LayoutParams
+                                    .FLAG_SECURE
+                    );
+                }
+            }
+
+        } catch (RuntimeException error) {
+            dismiss();
+
+            if (usable(activity)) {
+                Toast.makeText(
+                        activity,
+                        "Не удалось открыть настройки. " +
+                                "Попробуйте ещё раз.",
+                        Toast.LENGTH_LONG
+                ).show();
+            }
+        }
+    }
+
+    private static void render(
+            Activity activity,
+            Actions actions,
+            Dialog dialog,
+            LinearLayout root,
+            boolean choosingDelay
+    ) {
+        if (!usable(activity)) {
+            return;
+        }
+
+        root.removeAllViews();
+
+        LinearLayout toolbar =
+                new LinearLayout(activity);
+
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        toolbar.setPadding(
+                dp(activity, 12),
+                dp(activity, 8),
+                dp(activity, 16),
+                dp(activity, 8)
+        );
+
+        Button back = new Button(activity);
+        back.setText("‹");
+        back.setTextSize(32);
+        back.setTextColor(GOLD);
+        back.setAllCaps(false);
+        back.setMinWidth(0);
+        back.setMinimumWidth(0);
+        back.setPadding(0, 0, 0, 0);
+        back.setBackgroundTintList(null);
+        back.setBackground(
+                surface(activity, CARD, LINE, 14)
+        );
+        back.setContentDescription("Назад");
+
+        toolbar.addView(
+                back,
+                new LinearLayout.LayoutParams(
+                        dp(activity, 48),
+                        dp(activity, 48)
+                )
+        );
+
+        LinearLayout titles =
+                new LinearLayout(activity);
+
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titles.setPadding(
+                dp(activity, 14), 0, 0, 0
+        );
+
+        TextView title = label(
+                activity,
+                choosingDelay
+                        ? "Блокировка"
+                        : "Настройки",
+                23,
+                WHITE
+        );
+
+        title.setTypeface(
+                Typeface.DEFAULT,
+                Typeface.BOLD
+        );
+
+        titles.addView(title);
+
+        titles.addView(label(
+                activity,
+                "Лавка Вкуса",
+                12,
+                MUTED
+        ));
+
+        toolbar.addView(
+                titles,
+                new LinearLayout.LayoutParams(
+                        0,
+                        -2,
+                        1
+                )
+        );
+
+        root.addView(
+                toolbar,
+                new LinearLayout.LayoutParams(-1, -2)
+        );
+
+        android.view.View line =
+                new android.view.View(activity);
+
+        line.setBackgroundColor(LINE);
+
+        root.addView(
+                line,
+                new LinearLayout.LayoutParams(
+                        -1,
+                        dp(activity, 1)
+                )
+        );
+
         ScrollView scroll = new ScrollView(activity);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(BLACK);
+        scroll.setClipToPadding(false);
+        scroll.setVerticalScrollBarEnabled(false);
 
-        LinearLayout body = new LinearLayout(activity);
+        LinearLayout body =
+                new LinearLayout(activity);
+
         body.setOrientation(LinearLayout.VERTICAL);
         body.setPadding(
                 dp(activity, 20),
-                dp(activity, 12),
+                dp(activity, 8),
                 dp(activity, 20),
-                dp(activity, 20)
+                dp(activity, 32)
         );
 
-        scroll.addView(body);
+        scroll.addView(
+                body,
+                new ScrollView.LayoutParams(-1, -2)
+        );
 
+        root.addView(
+                scroll,
+                new LinearLayout.LayoutParams(
+                        -1,
+                        0,
+                        1
+                )
+        );
+
+        Runnable goBack = () -> {
+            if (choosingDelay) {
+                render(
+                        activity,
+                        actions,
+                        dialog,
+                        root,
+                        false
+                );
+            } else {
+                dialog.dismiss();
+            }
+        };
+
+        back.setOnClickListener(view -> goBack.run());
+
+        dialog.setOnKeyListener(
+                (ignored, keyCode, event) -> {
+                    if (choosingDelay &&
+                            keyCode == KeyEvent.KEYCODE_BACK) {
+                        if (event.getAction() ==
+                                KeyEvent.ACTION_UP) {
+                            goBack.run();
+                        }
+                        return true;
+                    }
+
+                    return false;
+                }
+        );
+
+        if (choosingDelay) {
+            delayContent(
+                    activity,
+                    actions,
+                    dialog,
+                    root,
+                    body
+            );
+        } else {
+            mainContent(
+                    activity,
+                    actions,
+                    dialog,
+                    root,
+                    body
+            );
+        }
+    }
+
+    private static void mainContent(
+            Activity activity,
+            Actions actions,
+            Dialog dialog,
+            LinearLayout root,
+            LinearLayout body
+    ) {
         boolean enabled =
                 protectionEnabled(activity);
 
@@ -158,18 +441,8 @@ public final class ShopSettings {
                 activity,
                 body,
                 "Отпечаток, изображение лица и код " +
-                "блокировки телефона не передаются магазину."
+                        "блокировки телефона не передаются магазину."
         );
-
-        AlertDialog dialog =
-                new AlertDialog.Builder(
-                        activity,
-                        android.R.style.Theme_Material_Dialog_Alert
-                )
-                        .setTitle("Настройки")
-                        .setView(scroll)
-                        .setPositiveButton("Закрыть", null)
-                        .create();
 
         addButton(
                 activity,
@@ -193,18 +466,21 @@ public final class ShopSettings {
                 body,
                 "Повторная блокировка: " +
                         delayLabel(lockAfterMillis(activity)),
-                () -> {
-                    dialog.dismiss();
-                    chooseDelay(activity, actions);
-                }
+                () -> render(
+                        activity,
+                        actions,
+                        dialog,
+                        root,
+                        true
+                )
         );
 
         description(
                 activity,
                 body,
                 "При новом запуске защищённого приложения " +
-                "проверка выполняется независимо от " +
-                "выбранного времени."
+                        "проверка выполняется независимо от " +
+                        "выбранного времени."
         );
 
         heading(activity, body, "Уведомления");
@@ -236,8 +512,8 @@ public final class ShopSettings {
                 activity,
                 body,
                 "Имя, телефон, город и адрес сохраняются " +
-                "на этом телефоне. Изменение данных " +
-                "не меняет уже оформленные заказы."
+                        "на этом телефоне. Изменение данных " +
+                        "не меняет уже оформленные заказы."
         );
 
         addButton(
@@ -264,36 +540,37 @@ public final class ShopSettings {
                 activity,
                 body,
                 "Не удаляйте приложение для обновления: " +
-                "при удалении можно потерять локальную " +
-                "историю и ключи просмотра заказов."
+                        "при удалении можно потерять локальную " +
+                        "историю и ключи просмотра заказов."
         );
 
-        activeDialog = dialog;
-        dialog.show();
-
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(
-                    background(activity)
-            );
-        }
-
-        Button close = dialog.getButton(
-                AlertDialog.BUTTON_POSITIVE
+        addButton(
+                activity,
+                body,
+                "Вернуться в магазин",
+                dialog::dismiss
         );
-
-        if (close != null) {
-            close.setTextColor(GOLD);
-        }
     }
 
-    private static void chooseDelay(
+    private static void delayContent(
             Activity activity,
-            Actions actions
+            Actions actions,
+            Dialog dialog,
+            LinearLayout root,
+            LinearLayout body
     ) {
-        if (activity.isFinishing() ||
-                activity.isDestroyed()) {
-            return;
-        }
+        heading(
+                activity,
+                body,
+                "Когда блокировать приложение?"
+        );
+
+        description(
+                activity,
+                body,
+                "Выберите время повторной проверки " +
+                        "после ухода приложения в фон."
+        );
 
         String[] labels = {
                 "Сразу после ухода в фон",
@@ -309,50 +586,55 @@ public final class ShopSettings {
 
         long current = lockAfterMillis(activity);
 
-        int selected =
-                current == 0L ? 0 :
-                current == 60000L ? 2 : 1;
+        for (int i = 0; i < values.length; i++) {
+            final long selectedValue = values[i];
 
-        AlertDialog choice = new AlertDialog.Builder(
-                activity,
-                android.R.style.Theme_Material_Dialog_Alert
-        )
-                .setTitle("Когда блокировать приложение?")
-                .setSingleChoiceItems(
-                        labels,
-                        selected,
-                        (dialog, which) -> {
-                            boolean saved =
-                                    preferences(activity)
-                                            .edit()
-                                            .putLong(
-                                                    DELAY,
-                                                    values[which]
-                                            )
-                                            .commit();
+            String title =
+                    (current == selectedValue ? "✓  " : "") +
+                            labels[i];
 
-                            dialog.dismiss();
+            addButton(
+                    activity,
+                    body,
+                    title,
+                    () -> {
+                        boolean saved =
+                                preferences(activity)
+                                        .edit()
+                                        .putLong(
+                                                DELAY,
+                                                selectedValue
+                                        )
+                                        .commit();
 
-                            Toast.makeText(
+                        Toast.makeText(
+                                activity,
+                                saved
+                                        ? "Настройка сохранена"
+                                        : "Не удалось сохранить настройку",
+                                Toast.LENGTH_SHORT
+                        ).show();
+
+                        if (saved) {
+                            render(
                                     activity,
-                                    saved
-                                            ? "Настройка сохранена"
-                                            : "Не удалось сохранить настройку",
-                                    Toast.LENGTH_SHORT
-                            ).show();
-
-                            show(activity, actions);
+                                    actions,
+                                    dialog,
+                                    root,
+                                    false
+                            );
                         }
-                )
-                .setNegativeButton(
-                        "Назад",
-                        (dialog, which) ->
-                                show(activity, actions)
-                )
-                .create();
+                    }
+            );
+        }
 
-        activeDialog = choice;
-        choice.show();
+        description(
+                activity,
+                body,
+                "Эта настройка не включает и не отключает " +
+                        "защиту входа. При новом запуске " +
+                        "включённая защита проверяется снова."
+        );
     }
 
     private static String delayLabel(long value) {
@@ -399,7 +681,7 @@ public final class ShopSettings {
             Toast.makeText(
                     activity,
                     "Откройте настройки Android → " +
-                    "Приложения → Лавка Вкуса → Уведомления.",
+                            "Приложения → Лавка Вкуса → Уведомления.",
                     Toast.LENGTH_LONG
             ).show();
         }
@@ -429,15 +711,39 @@ public final class ShopSettings {
         }
     }
 
+    private static boolean usable(Activity activity) {
+        return activity != null &&
+                !activity.isFinishing() &&
+                !activity.isDestroyed();
+    }
+
+    private static TextView label(
+            Activity activity,
+            String value,
+            int size,
+            int color
+    ) {
+        TextView text = new TextView(activity);
+        text.setText(value);
+        text.setTextColor(color);
+        text.setTextSize(size);
+        text.setLineSpacing(dp(activity, 3), 1f);
+
+        return text;
+    }
+
     private static void heading(
             Activity activity,
             LinearLayout parent,
             String value
     ) {
-        TextView text = new TextView(activity);
-        text.setText(value);
-        text.setTextColor(GOLD);
-        text.setTextSize(19);
+        TextView text = label(
+                activity,
+                value,
+                19,
+                GOLD
+        );
+
         text.setTypeface(
                 Typeface.DEFAULT,
                 Typeface.BOLD
@@ -445,12 +751,15 @@ public final class ShopSettings {
 
         text.setPadding(
                 0,
-                dp(activity, 18),
+                dp(activity, 20),
                 0,
                 dp(activity, 8)
         );
 
-        parent.addView(text);
+        parent.addView(
+                text,
+                new LinearLayout.LayoutParams(-1, -2)
+        );
     }
 
     private static void description(
@@ -458,20 +767,24 @@ public final class ShopSettings {
             LinearLayout parent,
             String value
     ) {
-        TextView text = new TextView(activity);
-        text.setText(value);
-        text.setTextColor(MUTED);
-        text.setTextSize(14);
-        text.setLineSpacing(dp(activity, 3), 1f);
+        TextView text = label(
+                activity,
+                value,
+                14,
+                MUTED
+        );
 
         text.setPadding(
                 0,
                 dp(activity, 4),
                 0,
-                dp(activity, 8)
+                dp(activity, 10)
         );
 
-        parent.addView(text);
+        parent.addView(
+                text,
+                new LinearLayout.LayoutParams(-1, -2)
+        );
     }
 
     private static void addButton(
@@ -484,17 +797,20 @@ public final class ShopSettings {
         button.setText(title);
         button.setAllCaps(false);
         button.setTextColor(WHITE);
-        button.setTextSize(14);
-        button.setMinHeight(dp(activity, 48));
-        button.setMinimumHeight(dp(activity, 48));
+        button.setTextSize(15);
+        button.setMinHeight(dp(activity, 52));
+        button.setMinimumHeight(dp(activity, 52));
         button.setBackgroundTintList(null);
-        button.setBackground(background(activity));
+
+        button.setBackground(
+                surface(activity, CARD, LINE, 14)
+        );
 
         button.setPadding(
+                dp(activity, 14),
                 dp(activity, 12),
-                dp(activity, 10),
-                dp(activity, 12),
-                dp(activity, 10)
+                dp(activity, 14),
+                dp(activity, 12)
         );
 
         LinearLayout.LayoutParams params =
@@ -514,15 +830,24 @@ public final class ShopSettings {
         );
     }
 
-    private static GradientDrawable background(
-            Context context
+    private static GradientDrawable surface(
+            Context context,
+            int color,
+            int stroke,
+            int radius
     ) {
         GradientDrawable drawable =
                 new GradientDrawable();
 
-        drawable.setColor(CARD);
-        drawable.setCornerRadius(dp(context, 16));
-        drawable.setStroke(dp(context, 1), GOLD);
+        drawable.setColor(color);
+        drawable.setCornerRadius(
+                dp(context, radius)
+        );
+
+        drawable.setStroke(
+                dp(context, 1),
+                stroke
+        );
 
         return drawable;
     }
@@ -533,8 +858,8 @@ public final class ShopSettings {
     ) {
         return Math.round(
                 value *
-                context.getResources()
-                        .getDisplayMetrics().density
+                        context.getResources()
+                                .getDisplayMetrics().density
         );
     }
 }
