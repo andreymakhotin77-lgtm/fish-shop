@@ -1035,6 +1035,38 @@ public class StoreActivity extends Activity {
                 titles, new LinearLayout.LayoutParams(0, -2, 1)
         );
 
+
+        // LAVKA_SETTINGS_GEAR_V1
+        TextView settingsGear = text(
+                "\u2699\uFE0E", 28, GOLD
+        );
+
+        settingsGear.setGravity(Gravity.CENTER);
+        settingsGear.setPadding(0, 0, 0, 0);
+        settingsGear.setBackground(
+                surface(CARD, LINE, 14)
+        );
+
+        settingsGear.setContentDescription(
+                "Настройки приложения"
+        );
+
+        settingsGear.setFocusable(true);
+
+        settingsGear.setOnClickListener(view -> {
+            if (this instanceof MainActivity) {
+                ((MainActivity) this).openShopSettings();
+            }
+        });
+
+        LinearLayout.LayoutParams gearParams =
+                new LinearLayout.LayoutParams(
+                        dp(48), dp(48)
+                );
+
+        gearParams.setMargins(dp(8), 0, 0, 0);
+        row.addView(settingsGear, gearParams);
+
         content.addView(row);
     }
 
