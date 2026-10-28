@@ -1,3 +1,4 @@
+// LAVKA_POLISHED_STORE_V1
 // LAVKA_COMPACT_INTERFACE_V1
 // LAVKA_CLEAN_STORE_TEXT_V1
 package ru.makeevka.fishshop;
@@ -1207,19 +1208,40 @@ public class StoreActivity extends Activity {
             if (p.promotion()) sales.add(p);
         }
 
+        
+        Set<String> shownOnHome = new HashSet<>();
+
         if (!sales.isEmpty()) {
-            sectionLink("Выгодные предложения", "Все  →",
-                    () -> openCatalog(true));
-            grid(new ArrayList<>(
+            List<Product> featuredSales = new ArrayList<>(
                     sales.subList(0, Math.min(4, sales.size()))
-            ));
+            );
+
+            for (Product p : featuredSales) {
+                shownOnHome.add(p.id);
+            }
+
+            sectionLink(
+                    "Выгодные предложения", "Все  →",
+                    () -> openCatalog(true)
+            );
+            grid(featuredSales);
         }
 
-        sectionLink("Выбирайте к столу", "Каталог  →",
-                () -> openCatalog(false));
-        grid(new ArrayList<>(
-                products.subList(0, Math.min(6, products.size()))
-        ));
+        List<Product> otherProducts = new ArrayList<>();
+        for (Product p : products) {
+            if (shownOnHome.contains(p.id)) continue;
+            otherProducts.add(p);
+            if (otherProducts.size() == 6) break;
+        }
+
+        if (!otherProducts.isEmpty()) {
+            sectionLink(
+                    "Выбирайте к столу", "Каталог  →",
+                    () -> openCatalog(false)
+            );
+            grid(otherProducts);
+        }
+        
 
         if (products.isEmpty() && freshCatalog) {
             emptyState(
@@ -1323,9 +1345,15 @@ public class StoreActivity extends Activity {
     private void addCategory(
             LinearLayout row, String title, String value
     ) {
-        Button chip = secondary(title, () -> openCategory(value));
+        Button chip = secondary(title, () -> {
+        saveProfile();
+        category = value;
+        tab = 1;
+        showingHistory = false;
+        render(false);
+    });
         chip.setTextSize(12);
-        if (category.equals(value) && !promotionsOnly) {
+        if (category.equals(value)) {
             chip.setTextColor(BLACK);
             chip.setBackground(surface(GOLD, 0, 14));
         }
@@ -1363,23 +1391,70 @@ public class StoreActivity extends Activity {
 
             categoryChips();
 
-            content.addView(secondary(
-                    promotionsOnly ? "Показать все товары" : "Только акции",
-                    () -> {
-                        search = query.getText().toString().trim();
-                        promotionsOnly = !promotionsOnly;
-                        redraw();
-                    }
-            ));
+            
+        LinearLayout filters = new LinearLayout(this);
+        filters.setGravity(Gravity.CENTER_VERTICAL);
+        filters.setPadding(0, dp(3), 0, dp(3));
 
-            if (!search.isEmpty() || !category.isEmpty() || promotionsOnly) {
-                content.addView(secondary("Сбросить фильтры", () -> {
-                    search = "";
-                    category = "";
-                    promotionsOnly = false;
-                    redraw();
-                }));
-            }
+        Switch saleSwitch = new Switch(this);
+        saleSwitch.setText("Только акции");
+        saleSwitch.setTextSize(14);
+        saleSwitch.setTextColor(WHITE);
+        saleSwitch.setMinHeight(dp(48));
+        saleSwitch.setPadding(0, 0, dp(10), 0);
+        saleSwitch.setThumbTintList(
+                ColorStateList.valueOf(GOLD)
+        );
+        saleSwitch.setTrackTintList(
+                new ColorStateList(
+                        new int[][]{
+                                new int[]{
+                                        android.R.attr.state_checked
+                                },
+                                new int[]{}
+                        },
+                        new int[]{
+                                Color.rgb(103, 86, 35),
+                                LINE
+                        }
+                )
+        );
+        saleSwitch.setChecked(promotionsOnly);
+
+        filters.addView(
+                saleSwitch,
+                new LinearLayout.LayoutParams(0, -2, 1)
+        );
+
+        saleSwitch.setOnCheckedChangeListener((v, checked) -> {
+            search = query.getText().toString().trim();
+            promotionsOnly = checked;
+            redraw();
+        });
+
+        if (!search.isEmpty() ||
+                !category.isEmpty() ||
+                promotionsOnly) {
+            TextView reset = bold("Сбросить", 13, GOLD);
+            reset.setGravity(Gravity.CENTER);
+            reset.setMinHeight(dp(48));
+            reset.setPadding(dp(12), 0, dp(4), 0);
+            reset.setContentDescription("Сбросить фильтры");
+            reset.setFocusable(true);
+            reset.setOnClickListener(v -> {
+                search = "";
+                category = "";
+                promotionsOnly = false;
+                redraw();
+            });
+            filters.addView(
+                    reset,
+                    new LinearLayout.LayoutParams(-2, -2)
+            );
+        }
+
+        content.addView(filters);
+        
         }
 
         List<Product> found = new ArrayList<>();
@@ -1514,6 +1589,24 @@ public class StoreActivity extends Activity {
         redraw();
     }
 
+
+    private String compactCategory(String value) {
+        if (value == null) return "";
+
+        String lower = value.toLowerCase(Locale.ROOT);
+
+        if (lower.contains("вялен") ||
+                lower.contains("сушён") || lower.contains("сушен")) {
+            return "Вяленая и сушёная рыба";
+        }
+
+        if (lower.contains("копч")) {
+            return "Копчёная рыба";
+        }
+
+        return value;
+    }
+
     private LinearLayout productCard(Product p) {
         LinearLayout card = box(false);
         card.setPadding(dp(9), dp(9), dp(9), dp(10));
@@ -1551,12 +1644,14 @@ public class StoreActivity extends Activity {
 
         badge(card, p);
 
-        TextView group = text(p.category, 10, MUTED);
+        TextView group = text(compactCategory(p.category), 10, MUTED);
+        group.setContentDescription(p.category);
         group.setSingleLine(true);
         group.setEllipsize(TextUtils.TruncateAt.END);
         card.addView(group);
 
         TextView name = bold(p.name, 15, WHITE);
+        name.setContentDescription("Товар: " + p.name);
         name.setMinLines(2);
         name.setMaxLines(2);
         name.setEllipsize(TextUtils.TruncateAt.END);
@@ -1962,9 +2057,13 @@ public class StoreActivity extends Activity {
             );
             otherCityInput.setEnabled(!busyCart());
         }
-        parent.addView(text(
-                deliveryHint(city, total()), 13, MUTED
-        ));
+        
+        if (tab == 3) {
+            parent.addView(text(
+                    deliveryHint(city, total()), 13, MUTED
+            ));
+        }
+        
     }
 
     private void customerFields(LinearLayout parent, boolean order) {
@@ -2469,16 +2568,15 @@ public class StoreActivity extends Activity {
                 14, WHITE
         ));
         orders.addView(button("Открыть историю  →", this::openHistory));
-        orders.addView(text(
-                "После удаления приложения история и ключи " +
-                "просмотра заказов не восстановятся.",
-                12, MUTED
-        ));
+        
 
         String last = prefs.getString("last_order_v2", "");
         if (!last.isEmpty()) {
             orders.addView(bold("Последний заказ", 16, WHITE));
-            orders.addView(text(last, 14, MUTED));
+            orders.addView(text(
+                last.replace("\nМосковское время, UTC+3.", ""),
+                14, MUTED
+        ));
         }
         if (pending != null) {
             orders.addView(button(
@@ -2489,11 +2587,7 @@ public class StoreActivity extends Activity {
 
         LinearLayout profile = panel();
         profile.addView(bold("Данные покупателя", 21, WHITE));
-        profile.addView(text(
-                "Хранятся на этом телефоне. " +
-                "Регистрация на сервере не используется.",
-                12, MUTED
-        ));
+        
         customerFields(profile, false);
         profile.addView(button("Сохранить данные", () -> {
             saveProfile();
@@ -2505,13 +2599,7 @@ public class StoreActivity extends Activity {
 
         ShopContacts.addTo(this, content);
 
-        LinearLayout conditions = panel();
         
-        conditions.addView(text(
-                "Даты и интервалы — по московскому времени. " +
-                "Детали заказа подтверждает продавец.",
-                13, MUTED
-        ));
     }
 
     // ==================== ИСТОРИЯ ====================

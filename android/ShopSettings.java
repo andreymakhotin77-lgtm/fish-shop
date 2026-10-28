@@ -1,3 +1,4 @@
+// LAVKA_POLISHED_SETTINGS_V1
 // LAVKA_CLEAN_SETTINGS_TEXT_V1
 package ru.makeevka.fishshop;
 
@@ -418,6 +419,7 @@ public final class ShopSettings {
         }
     }
 
+
     private static void mainContent(
             Activity activity,
             Actions actions,
@@ -425,35 +427,16 @@ public final class ShopSettings {
             LinearLayout root,
             LinearLayout body
     ) {
-        boolean enabled =
-                protectionEnabled(activity);
+        boolean enabled = protectionEnabled(activity);
 
         heading(activity, body, "Безопасность");
 
-        description(
-                activity,
-                body,
-                enabled
-                        ? "Защита входа включена."
-                        : "Защита входа отключена."
-        );
-
-        description(
-                activity,
-                body,
-                "Отпечаток, изображение лица и код " +
-                        "блокировки телефона не передаются магазину."
-        );
-
-        addButton(
-                activity,
-                body,
-                enabled
-                        ? "Отключить защиту входа"
-                        : "Включить защиту входа",
+        settingsRow(
+                activity, body,
+                "Защита входа",
+                enabled ? "Включена" : "Отключена",
                 () -> {
                     dialog.dismiss();
-
                     if (enabled) {
                         actions.disableProtection();
                     } else {
@@ -462,45 +445,28 @@ public final class ShopSettings {
                 }
         );
 
-        addButton(
-                activity,
-                body,
-                "Повторная блокировка: " +
-                        delayLabel(lockAfterMillis(activity)),
+        settingsRow(
+                activity, body,
+                "Повторная блокировка",
+                delayLabel(lockAfterMillis(activity)),
                 () -> render(
-                        activity,
-                        actions,
-                        dialog,
-                        root,
-                        true
+                        activity, actions, dialog, root, true
                 )
         );
 
         description(
-                activity,
-                body,
-                "При новом запуске защищённого приложения " +
-                        "проверка выполняется независимо от " +
-                        "выбранного времени."
+                activity, body,
+                "Биометрия и код телефона не передаются магазину. " +
+                "При новом запуске включённая защита проверяется снова."
         );
 
         heading(activity, body, "Уведомления");
 
-        description(
-                activity,
-                body,
+        settingsRow(
+                activity, body,
+                "Уведомления о заказах",
                 notificationsEnabled(activity)
-                        ? "Уведомления приложения разрешены. " +
-                          "Отдельные категории можно проверить " +
-                          "в настройках Android."
-                        : "Уведомления приложения отключены " +
-                          "в настройках Android."
-        );
-
-        addButton(
-                activity,
-                body,
-                "Настроить уведомления",
+                        ? "Разрешены" : "Отключены",
                 () -> {
                     dialog.dismiss();
                     openNotifications(activity);
@@ -509,18 +475,10 @@ public final class ShopSettings {
 
         heading(activity, body, "Данные покупателя");
 
-        description(
-                activity,
-                body,
-                "Имя, телефон, город и адрес сохраняются " +
-                        "на этом телефоне. Изменение данных " +
-                        "не меняет уже оформленные заказы."
-        );
-
-        addButton(
-                activity,
-                body,
+        settingsRow(
+                activity, body,
                 "Изменить мои данные",
+                "",
                 () -> {
                     dialog.dismiss();
                     actions.editCustomerData();
@@ -529,16 +487,133 @@ public final class ShopSettings {
 
         heading(activity, body, "О приложении");
 
-        description(activity, body, "Лавка Вкуса\nВерсия: " + version(activity));
-
-        
-
-        addButton(
-                activity,
-                body,
-                "Вернуться в магазин",
-                dialog::dismiss
+        description(
+                activity, body,
+                "Лавка Вкуса\nВерсия: " + version(activity)
         );
+
+        TextView dataNotice = label(
+                activity,
+                "Имя, телефон и адрес для автозаполнения, " +
+                "корзина, избранное и история хранятся " +
+                "на этом телефоне.\n\n" +
+                "При оформлении заказа его данные передаются " +
+                "магазину и сохраняются на сервере. " +
+                "Изменение профиля не меняет уже оформленные заказы.\n\n" +
+                "При удалении приложения или очистке его данных " +
+                "локальная история и ключи просмотра будут потеряны. " +
+                "Автоматического восстановления истории " +
+                "на другом телефоне сейчас нет.\n\n" +
+                "Для обновления устанавливайте новый APK поверх " +
+                "приложения, без удаления.",
+                14, MUTED
+        );
+
+        dataNotice.setPadding(
+                dp(activity, 12), dp(activity, 10),
+                dp(activity, 12), dp(activity, 16)
+        );
+        dataNotice.setVisibility(android.view.View.GONE);
+
+        LinearLayout dataLink = settingsRow(
+                activity, body,
+                "О данных",
+                "Хранение и история заказов",
+                () -> {
+                    boolean opening = dataNotice.getVisibility()
+                            != android.view.View.VISIBLE;
+                    dataNotice.setVisibility(
+                            opening
+                                    ? android.view.View.VISIBLE
+                                    : android.view.View.GONE
+                    );
+                }
+        );
+        dataLink.setContentDescription(
+                "О данных. Показать или скрыть сведения " +
+                "о хранении данных и истории заказов."
+        );
+
+        body.addView(
+                dataNotice,
+                new LinearLayout.LayoutParams(-1, -2)
+        );
+    }
+
+    private static LinearLayout settingsRow(
+            Activity activity,
+            LinearLayout parent,
+            String title,
+            String value,
+            Runnable action
+    ) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(activity, 64));
+        row.setPadding(
+                dp(activity, 14), dp(activity, 12),
+                dp(activity, 14), dp(activity, 12)
+        );
+
+        GradientDrawable normal =
+                surface(activity, CARD, 0, 14);
+
+        row.setBackground(
+                new android.graphics.drawable.RippleDrawable(
+                        android.content.res.ColorStateList.valueOf(
+                                Color.argb(45, 212, 175, 55)
+                        ),
+                        normal,
+                        surface(activity, Color.WHITE, 0, 14)
+                )
+        );
+
+        LinearLayout labels = new LinearLayout(activity);
+        labels.setOrientation(LinearLayout.VERTICAL);
+
+        TextView name = label(activity, title, 16, WHITE);
+        labels.addView(name);
+
+        if (value != null && !value.isEmpty()) {
+            TextView detail = label(activity, value, 13, MUTED);
+            detail.setPadding(0, dp(activity, 3), 0, 0);
+            labels.addView(detail);
+        }
+
+        labels.setImportantForAccessibility(
+                android.view.View
+                        .IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        );
+
+        row.addView(
+                labels,
+                new LinearLayout.LayoutParams(0, -2, 1)
+        );
+
+        TextView arrow = label(activity, "›", 27, GOLD);
+        arrow.setPadding(dp(activity, 12), 0, 0, 0);
+        arrow.setImportantForAccessibility(
+                android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        );
+        row.addView(arrow);
+
+        row.setFocusable(true);
+        row.setContentDescription(
+                title +
+                (value == null || value.isEmpty()
+                        ? "" : ". " + value)
+        );
+        row.setOnClickListener(view -> action.run());
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(-1, -2);
+        params.setMargins(
+                0, dp(activity, 4), 0, dp(activity, 4)
+        );
+        parent.addView(row, params);
+
+        return row;
     }
 
     private static void delayContent(
