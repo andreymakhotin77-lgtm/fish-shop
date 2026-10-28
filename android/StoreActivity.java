@@ -32,6 +32,34 @@ import java.time.LocalTime;
 import java.util.*;
 
 public class StoreActivity extends Activity {
+    // LAVKA_PRODUCT_MOTION_V1
+    private ProductMotion productMotion;
+
+    private void playProductFlight(
+            ProductMotion.Flight flight
+    ) {
+        if (flight == null) return;
+
+        if (destroyed || navigation == null) {
+            flight.release();
+            return;
+        }
+
+        navigation.post(() -> {
+            if (destroyed ||
+                    productMotion == null ||
+                    !hasWindowFocus() ||
+                    navigation.getChildCount() <= 3) {
+                flight.release();
+                return;
+            }
+
+            productMotion.play(
+                    flight,
+                    navigation.getChildAt(3)
+            );
+        });
+    }
     private Button comfortCartButton;
     private Button comfortCitySelector;
     private CheckBox comfortAgreement;
@@ -207,6 +235,7 @@ public class StoreActivity extends Activity {
         // Не меняем хранилище: история и ключи остаются на месте.
         prefs = getPreferences(MODE_PRIVATE);
         api = new ShopApi();
+        productMotion = new ProductMotion(this);
         restore();
 
         LinearLayout root = new LinearLayout(this);
@@ -1498,6 +1527,7 @@ public class StoreActivity extends Activity {
                 11, MUTED
         ));
         quantityControls(card, p);
+        productMotion.bind(p.id, card, photo);
         return card;
     }
 
@@ -1746,10 +1776,14 @@ public class StoreActivity extends Activity {
                 return;
             }
 
+            ProductMotion.Flight motionFlight =
+                    productMotion.prepare(photo);
+
             cart.put(p.id, next);
             saveCart();
             dialog.dismiss();
             redraw();
+            playProductFlight(motionFlight);
 
             Toast.makeText(
                     StoreActivity.this,
@@ -1825,11 +1859,17 @@ public class StoreActivity extends Activity {
             message("Количество", "Можно выбрать до 50 " + p.unit + ".");
             return false;
         }
+        ProductMotion.Flight motionFlight =
+                direction > 0
+                        ? productMotion.prepare(p.id)
+                        : null;
+
         if (next <= 0) cart.remove(p.id);
         else cart.put(p.id, next);
 
         saveCart();
         redraw();
+        playProductFlight(motionFlight);
         return true;
     }
 
@@ -3645,12 +3685,18 @@ public class StoreActivity extends Activity {
     @Override
     protected void onPause() {
         saveProfile();
+        if (productMotion != null) {
+            productMotion.stopFlight();
+        }
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
         destroyed = true;
+        if (productMotion != null) {
+            productMotion.close();
+        }
         if (api != null) api.close();
         super.onDestroy();
     }
