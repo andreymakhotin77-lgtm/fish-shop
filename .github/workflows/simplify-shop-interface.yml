@@ -1,0 +1,368 @@
+name: Simplify shop interface
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Simplify interface and limit cat animation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          store_path = Path("android/StoreActivity.java")
+          cat_path = Path("android/CatWelcome.java")
+
+          store_marker = "// LAVKA_COMPACT_INTERFACE_V1"
+          cat_marker = "// LAVKA_CAT_24_HOURS_V1"
+
+          def fail(message):
+              raise SystemExit(
+                  message + " No files changed."
+              )
+
+          for path in (store_path, cat_path):
+              if not path.is_file():
+                  fail("Missing file: " + str(path))
+
+          store = store_path.read_text(encoding="utf-8")
+          cat = cat_path.read_text(encoding="utf-8")
+
+          def replace_once(source, old, new, label):
+              count = source.count(old)
+
+              if count != 1:
+                  fail(
+                      label + ": expected one match, found " +
+                      str(count) + "."
+                  )
+
+              return source.replace(old, new, 1)
+
+          def replace_flexible(source, old, new, label):
+              parts = re.split(r"(\s+)", old.strip())
+
+              pattern = "".join(
+                  r"\s+" if part.isspace()
+                  else re.escape(part)
+                  for part in parts
+                  if part
+              )
+
+              matches = list(re.finditer(pattern, source))
+
+              if len(matches) != 1:
+                  fail(
+                      label + ": expected one match, found " +
+                      str(len(matches)) + "."
+                  )
+
+              match = matches[0]
+
+              return (
+                  source[:match.start()] +
+                  new +
+                  source[match.end():]
+              )
+
+          updated_store = store
+          updated_cat = cat
+
+          # ===== STORE INTERFACE =====
+
+          if store_marker not in store:
+              home_start = "    private void showHome() {"
+              home_end = "    private List<String> categories() {"
+
+              if store.count(home_start) != 1:
+                  fail("Home method structure differs.")
+
+              if store.count(home_end) != 1:
+                  fail("Categories method structure differs.")
+
+              first = store.index(home_start)
+              last = store.index(home_end)
+
+              if last <= first:
+                  fail("Unexpected method order.")
+
+              home = store[first:last]
+
+              hero_start = "        LinearLayout hero = panel();"
+              hero_end = "        LinearLayout deliveryCard = panel();"
+
+              if home.count(hero_start) != 1:
+                  fail("Hero start differs.")
+
+              if home.count(hero_end) != 1:
+                  fail("Delivery card start differs.")
+
+              a = home.index(hero_start)
+              b = home.index(hero_end)
+
+              if b <= a:
+                  fail("Unexpected hero structure.")
+
+              compact_hero = (
+                  "        LinearLayout hero = panel();\n"
+                  "        hero.setPadding(\n"
+                  "                dp(14), dp(10),\n"
+                  "                dp(14), dp(10)\n"
+                  "        );\n"
+                  "        hero.setBackground(\n"
+                  "                surface(CARD, 0, 18)\n"
+                  "        );\n"
+                  "        hero.addView(bold(\n"
+                  "                \"К вашему столу\", 21, WHITE\n"
+                  "        ));\n"
+                  "        hero.addView(text(\n"
+                  "                \"Рыба, морепродукты и раки\",\n"
+                  "                13, MUTED\n"
+                  "        ));\n\n"
+              )
+
+              home = (
+                  home[:a] +
+                  compact_hero +
+                  home[b:]
+              )
+
+              home = replace_once(
+                  home,
+                  'sectionLink("Категории", "Все  →", () -> openCatalog(false));',
+                  'section("Категории");',
+                  "Repeated categories link"
+              )
+
+              home = replace_flexible(
+                  home,
+                  '''
+                  } else {
+                      LinearLayout promo = panel();
+                      promo.addView(bold("Специальные предложения", 19, GOLD));
+                      promo.addView(text(
+                          "Когда в магазине появятся акции, " +
+                          "они будут доступны здесь.", 13, MUTED
+                      ));
+                      promo.addView(secondary(
+                          "Раздел акций", () -> openCatalog(true)
+                      ));
+                  }
+                  ''',
+                  "}",
+                  "Empty promotions block"
+              )
+
+              home = replace_flexible(
+                  home,
+                  '''
+                  content.addView(secondary(
+                      "Обновить ассортимент", this::loadCatalog
+                  ));
+                  ''',
+                  "",
+                  "Repeated home refresh button"
+              )
+
+              if home.count(
+                  "DeliveryTruckAnimation.install(deliveryCard);"
+              ) != 1:
+                  fail("Delivery animation connection differs.")
+
+              updated_store = (
+                  store[:first] +
+                  home +
+                  store[last:]
+              )
+
+              # Ordinary cards: dark surface, no outline.
+              # Explicitly highlighted cards retain a gold outline.
+              box_start = (
+                  "    private LinearLayout box(boolean border) {"
+              )
+              box_end = "    private LinearLayout panel() {"
+
+              if updated_store.count(box_start) != 1:
+                  fail("Box method differs.")
+
+              if updated_store.count(box_end) != 1:
+                  fail("Panel method differs.")
+
+              a = updated_store.index(box_start)
+              b = updated_store.index(box_end)
+
+              if b <= a:
+                  fail("Unexpected box structure.")
+
+              box = updated_store[a:b]
+
+              box = replace_once(
+                  box,
+                  "surface(CARD, border ? GOLD : LINE, 20)",
+                  "surface(CARD, border ? GOLD : 0, 20)",
+                  "Ordinary card outlines"
+              )
+
+              updated_store = (
+                  updated_store[:a] +
+                  box +
+                  updated_store[b:]
+              )
+
+              # Keep delivery terms in checkout.
+              checkout = (
+                  "summary.addView(text(DELIVERY, 13, MUTED));"
+              )
+
+              if store.count(checkout) != 1:
+                  fail("Checkout structure differs.")
+
+              if updated_store.count(checkout) != 1:
+                  fail("Checkout delivery text affected.")
+
+              if (
+                  "protected boolean isHomeForCat()"
+                  not in updated_store
+              ):
+                  fail("Cat home-screen check missing.")
+
+              updated_store = (
+                  store_marker + "\n" + updated_store
+              )
+
+          else:
+              print("Compact interface already connected.")
+
+          # ===== CAT: ONCE PER 24 HOURS =====
+
+          if cat_marker not in cat:
+              constants = (
+                  "public final class CatWelcome {\n\n"
+                  "    " + cat_marker + "\n"
+                  "    private static final String DAILY_PREFS =\n"
+                  "            \"lavka_cat_frequency_v1\";\n"
+                  "    private static final String LAST_RUN =\n"
+                  "            \"last_actual_run_ms\";\n"
+                  "    private static final long INTERVAL_MS =\n"
+                  "            24L * 60L * 60L * 1000L;\n"
+              )
+
+              updated_cat = replace_once(
+                  cat,
+                  "public final class CatWelcome {",
+                  constants,
+                  "Cat class declaration"
+              )
+
+              old_should_show = '''
+              public static boolean shouldShow(Activity activity) {
+                  return activity != null &&
+                          !activity.isFinishing() &&
+                          !activity.isDestroyed() &&
+                          ValueAnimator.areAnimatorsEnabled();
+              }
+              '''
+
+              new_should_show = (
+                  "public static boolean shouldShow(Activity activity) {\n"
+                  "        if (activity == null ||\n"
+                  "                activity.isFinishing() ||\n"
+                  "                activity.isDestroyed() ||\n"
+                  "                !ValueAnimator.areAnimatorsEnabled()) {\n"
+                  "            return false;\n"
+                  "        }\n\n"
+                  "        long last = activity.getSharedPreferences(\n"
+                  "                DAILY_PREFS, Activity.MODE_PRIVATE\n"
+                  "        ).getLong(LAST_RUN, 0L);\n\n"
+                  "        if (last <= 0L) return true;\n\n"
+                  "        long now = System.currentTimeMillis();\n"
+                  "        return now >= last &&\n"
+                  "                now - last >= INTERVAL_MS;\n"
+                  "    }"
+              )
+
+              updated_cat = replace_flexible(
+                  updated_cat,
+                  old_should_show,
+                  new_should_show,
+                  "Cat frequency check"
+              )
+
+              actual_start = (
+                  "        scene = new CatScene();"
+              )
+
+              save_actual_start = (
+                  "        // Count only an actual animation start.\n"
+                  "        boolean saved = activity.getSharedPreferences(\n"
+                  "                DAILY_PREFS, Activity.MODE_PRIVATE\n"
+                  "        ).edit().putLong(\n"
+                  "                LAST_RUN, System.currentTimeMillis()\n"
+                  "        ).commit();\n\n"
+                  "        if (!saved) {\n"
+                  "            finish();\n"
+                  "            return;\n"
+                  "        }\n\n"
+                  "        scene = new CatScene();"
+              )
+
+              updated_cat = replace_once(
+                  updated_cat,
+                  actual_start,
+                  save_actual_start,
+                  "Actual cat animation start"
+              )
+
+          else:
+              print("Cat daily limit already connected.")
+
+          # All validation finishes before either file is written.
+          if updated_store != store:
+              store_path.write_text(
+                  updated_store,
+                  encoding="utf-8"
+              )
+
+          if updated_cat != cat:
+              cat_path.write_text(
+                  updated_cat,
+                  encoding="utf-8"
+              )
+
+          print("SUCCESS: interface simplified.")
+          print("Cat animation limited to once per 24 hours.")
+          print("Checkout delivery terms preserved.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          if git diff --quiet -- android/StoreActivity.java android/CatWelcome.java; then
+            echo "No new changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android/StoreActivity.java android/CatWelcome.java
+            git commit -m "Simplify store interface and limit cat animation"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
