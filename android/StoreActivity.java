@@ -34,7 +34,9 @@ import java.util.*;
 public class StoreActivity extends Activity {
     // LAVKA_PRODUCT_MOTION_V1
     private ProductMotion productMotion;
+    private int productFlightGeneration;
 
+    // LAVKA_PRODUCT_FLIGHT_FOCUS_FIX_V1
     private void playProductFlight(
             ProductMotion.Flight flight
     ) {
@@ -45,19 +47,51 @@ public class StoreActivity extends Activity {
             return;
         }
 
-        navigation.post(() -> {
-            if (destroyed ||
-                    productMotion == null ||
-                    !hasWindowFocus() ||
-                    navigation.getChildCount() <= 3) {
-                flight.release();
-                return;
-            }
+        final int generation = productFlightGeneration;
+        final long deadline =
+                android.os.SystemClock.uptimeMillis() + 900L;
 
-            productMotion.play(
-                    flight,
-                    navigation.getChildAt(3)
-            );
+        navigation.post(new Runnable() {
+            @Override
+            public void run() {
+                if (destroyed ||
+                        generation != productFlightGeneration ||
+                        productMotion == null ||
+                        navigation == null ||
+                        isFinishing() ||
+                        isDestroyed()) {
+                    flight.release();
+                    return;
+                }
+
+                if (navigation.getChildCount() > 3) {
+                    View target = navigation.getChildAt(3);
+
+                    boolean ready =
+                            hasWindowFocus() &&
+                            navigation.isAttachedToWindow() &&
+                            target.isShown() &&
+                            target.getWidth() > 0 &&
+                            target.getHeight() > 0;
+
+                    if (ready) {
+                        productMotion.play(flight, target);
+                        return;
+                    }
+                }
+
+                if (android.os.SystemClock.uptimeMillis() >= deadline) {
+                    flight.release();
+                    return;
+                }
+
+                boolean queued =
+                        navigation.postDelayed(this, 32L);
+
+                if (!queued) {
+                    flight.release();
+                }
+            }
         });
     }
     private Button comfortCartButton;
@@ -3685,6 +3719,7 @@ public class StoreActivity extends Activity {
     @Override
     protected void onPause() {
         saveProfile();
+        productFlightGeneration++;
         if (productMotion != null) {
             productMotion.stopFlight();
         }
@@ -3694,6 +3729,7 @@ public class StoreActivity extends Activity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        productFlightGeneration++;
         if (productMotion != null) {
             productMotion.close();
         }
