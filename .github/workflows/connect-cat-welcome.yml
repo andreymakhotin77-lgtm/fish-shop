@@ -1,0 +1,194 @@
+name: Connect cat welcome
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Connect welcome safely
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main_path = Path("android/MainActivity.java")
+          cat_path = Path("android/CatWelcome.java")
+
+          def fail(message):
+              raise SystemExit(
+                  message + " No files changed."
+              )
+
+          if not main_path.is_file():
+              fail("MainActivity.java missing.")
+
+          if not cat_path.is_file():
+              fail("CatWelcome.java missing.")
+
+          source = main_path.read_text(encoding="utf-8")
+          cat = cat_path.read_text(encoding="utf-8")
+
+          if "public final class CatWelcome" not in cat:
+              fail("Unexpected CatWelcome.java.")
+
+          marker = "// LAVKA_CAT_WELCOME_V1"
+
+          if marker in source:
+              checks = [
+                  "private CatWelcome catWelcome;",
+                  "CatWelcome.shouldShow(this)",
+                  "catWelcome.isBlocking()",
+                  "catWelcome.dispose();"
+              ]
+
+              if not all(value in source for value in checks):
+                  fail("Existing welcome connection differs.")
+
+              print("Cat welcome already connected.")
+              raise SystemExit(0)
+
+          def replace_once(old, new, label):
+              global source
+
+              count = source.count(old)
+
+              if count != 1:
+                  fail(
+                      label +
+                      ": expected one match, found " +
+                      str(count) + "."
+                  )
+
+              source = source.replace(old, new, 1)
+
+          replace_once(
+              "    private OrderPushSubscriptions orderPush;",
+              (
+                  "    private OrderPushSubscriptions orderPush;\n"
+                  "\n"
+                  "    " + marker + "\n"
+                  "    private CatWelcome catWelcome;"
+              ),
+              "Activity fields"
+          )
+
+          replace_once(
+              (
+                  "        startBuyerServices();\n"
+                  "    }\n"
+                  "\n"
+                  "    private void continueWithoutProtection() {"
+              ),
+              (
+                  "        if (CatWelcome.shouldShow(this)) {\n"
+                  "            catWelcome = new CatWelcome(\n"
+                  "                    this,\n"
+                  "                    () -> {\n"
+                  "                        catWelcome = null;\n"
+                  "                        startBuyerServices();\n"
+                  "                    }\n"
+                  "            );\n"
+                  "            catWelcome.start();\n"
+                  "            return;\n"
+                  "        }\n"
+                  "\n"
+                  "        startBuyerServices();\n"
+                  "    }\n"
+                  "\n"
+                  "    private void continueWithoutProtection() {"
+              ),
+              "Unlock completion"
+          )
+
+          replace_once(
+              (
+                  "    private void startBuyerServices() {\n"
+                  "        if (!resumed || !unlocked || closing) {"
+              ),
+              (
+                  "    private void startBuyerServices() {\n"
+                  "        if (catWelcome != null &&\n"
+                  "                catWelcome.isBlocking()) {\n"
+                  "            return;\n"
+                  "        }\n"
+                  "\n"
+                  "        if (!resumed || !unlocked || closing) {"
+              ),
+              "Buyer services guard"
+          )
+
+          replace_once(
+              (
+                  "    protected void onPause() {\n"
+                  "        resumed = false;\n"
+                  "        super.onPause();"
+              ),
+              (
+                  "    protected void onPause() {\n"
+                  "        resumed = false;\n"
+                  "\n"
+                  "        if (catWelcome != null) {\n"
+                  "            catWelcome.finish();\n"
+                  "            catWelcome = null;\n"
+                  "        }\n"
+                  "\n"
+                  "        super.onPause();"
+              ),
+              "Pause lifecycle"
+          )
+
+          replace_once(
+              (
+                  "    protected void onDestroy() {\n"
+                  "        closing = true;\n"
+                  "        resumed = false;"
+              ),
+              (
+                  "    protected void onDestroy() {\n"
+                  "        closing = true;\n"
+                  "        resumed = false;\n"
+                  "\n"
+                  "        if (catWelcome != null) {\n"
+                  "            catWelcome.dispose();\n"
+                  "            catWelcome = null;\n"
+                  "        }"
+              ),
+              "Destroy lifecycle"
+          )
+
+          main_path.write_text(source, encoding="utf-8")
+
+          print("SUCCESS: first-run cat welcome connected.")
+          print("Login protection and store data unchanged.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          if git diff --quiet -- android/MainActivity.java; then
+            echo "No new changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android/MainActivity.java
+            git commit -m "Connect first-run gold cat welcome"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
