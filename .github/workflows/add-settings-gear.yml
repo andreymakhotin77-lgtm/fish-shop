@@ -1,0 +1,157 @@
+name: Add settings gear
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Add gear safely
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("android/StoreActivity.java")
+          main_path = Path("android/MainActivity.java")
+
+          for item in (path, main_path):
+              if not item.is_file():
+                  raise SystemExit(f"Missing file: {item}")
+
+          source = path.read_text(encoding="utf-8")
+          main = main_path.read_text(encoding="utf-8")
+
+          if "public void openShopSettings()" not in main:
+              raise SystemExit(
+                  "Settings are not connected. No files changed."
+              )
+
+          marker = "// LAVKA_SETTINGS_GEAR_V1"
+
+          if marker not in source:
+              start_anchor = "    private void header() {"
+              end_anchor = "    private void drawNavigation() {"
+
+              if (
+                  source.count(start_anchor) != 1
+                  or source.count(end_anchor) != 1
+              ):
+                  raise SystemExit(
+                      "Header structure differs. No files changed."
+                  )
+
+              start = source.index(start_anchor)
+              end = source.index(end_anchor, start)
+
+              header = source[start:end]
+
+              anchor = "        content.addView(row);"
+
+              matches = [
+                  line for line in header.splitlines()
+                  if line == anchor
+              ]
+
+              if len(matches) != 1:
+                  raise SystemExit(
+                      "Header insertion point differs. No files changed."
+                  )
+
+              addition = r'''
+                  // LAVKA_SETTINGS_GEAR_V1
+                  TextView settingsGear = text(
+                          "\u2699\uFE0E", 28, GOLD
+                  );
+
+                  settingsGear.setGravity(Gravity.CENTER);
+                  settingsGear.setPadding(0, 0, 0, 0);
+                  settingsGear.setBackground(
+                          surface(CARD, LINE, 14)
+                  );
+
+                  settingsGear.setContentDescription(
+                          "Настройки приложения"
+                  );
+
+                  settingsGear.setFocusable(true);
+
+                  settingsGear.setOnClickListener(view -> {
+                      if (this instanceof MainActivity) {
+                          ((MainActivity) this).openShopSettings();
+                      }
+                  });
+
+                  LinearLayout.LayoutParams gearParams =
+                          new LinearLayout.LayoutParams(
+                                  dp(48), dp(48)
+                          );
+
+                  gearParams.setMargins(dp(8), 0, 0, 0);
+                  row.addView(settingsGear, gearParams);
+
+          '''
+
+              lines = header.splitlines(keepends=True)
+
+              for index, line in enumerate(lines):
+                  if line.rstrip("\r\n") == anchor:
+                      lines[index] = addition + line
+                      break
+
+              updated_header = "".join(lines)
+
+              source = (
+                  source[:start]
+                  + updated_header
+                  + source[end:]
+              )
+
+          required = [
+              marker,
+              "settingsGear.setContentDescription(",
+              "row.addView(settingsGear, gearParams);",
+              "((MainActivity) this).openShopSettings();",
+          ]
+
+          for fragment in required:
+              if fragment not in source:
+                  raise SystemExit(
+                      "Verification failed. No files changed."
+                  )
+
+          path.write_text(source, encoding="utf-8")
+          print("Settings gear connected successfully.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add android/StoreActivity.java
+
+          if git diff --cached --quiet; then
+            echo "Settings gear is already connected"
+          else
+            git commit -m "Add settings gear to shop header"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
