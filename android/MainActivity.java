@@ -47,6 +47,9 @@ public class MainActivity extends StoreActivity {
     private DeviceLogin deviceLogin;
     private OrderPushSubscriptions orderPush;
 
+    // LAVKA_CAT_WELCOME_V1
+    private CatWelcome catWelcome;
+
     private FrameLayout gate;
     private TextView gateTitle;
     private TextView gateHint;
@@ -442,6 +445,18 @@ public class MainActivity extends StoreActivity {
             );
         }
 
+        if (CatWelcome.shouldShow(this)) {
+            catWelcome = new CatWelcome(
+                    this,
+                    () -> {
+                        catWelcome = null;
+                        startBuyerServices();
+                    }
+            );
+            catWelcome.start();
+            return;
+        }
+
         startBuyerServices();
     }
 
@@ -574,6 +589,12 @@ public class MainActivity extends StoreActivity {
     @Override
     protected void onPause() {
         resumed = false;
+
+        if (catWelcome != null) {
+            catWelcome.finish();
+            catWelcome = null;
+        }
+
         super.onPause();
     }
 
@@ -635,6 +656,11 @@ public class MainActivity extends StoreActivity {
     // ==================== УВЕДОМЛЕНИЯ ====================
 
     private void startBuyerServices() {
+        if (catWelcome != null &&
+                catWelcome.isBlocking()) {
+            return;
+        }
+
         if (!resumed || !unlocked || closing) {
             return;
         }
@@ -691,6 +717,11 @@ public class MainActivity extends StoreActivity {
     protected void onDestroy() {
         closing = true;
         resumed = false;
+
+        if (catWelcome != null) {
+            catWelcome.dispose();
+            catWelcome = null;
+        }
 
         ShopSettings.dismiss();
 
