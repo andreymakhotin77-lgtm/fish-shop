@@ -18,6 +18,15 @@ import android.view.animation.LinearInterpolator;
  */
 public final class CatWelcome {
 
+    // LAVKA_CAT_24_HOURS_V1
+    private static final String DAILY_PREFS =
+            "lavka_cat_frequency_v1";
+    private static final String LAST_RUN =
+            "last_actual_run_ms";
+    private static final long INTERVAL_MS =
+            24L * 60L * 60L * 1000L;
+
+
     private final Activity activity;
     private final Runnable completed;
 
@@ -45,10 +54,22 @@ public final class CatWelcome {
 
     // Старое хранилище первого запуска больше не используется.
     public static boolean shouldShow(Activity activity) {
-        return activity != null &&
-                !activity.isFinishing() &&
-                !activity.isDestroyed() &&
-                ValueAnimator.areAnimatorsEnabled();
+        if (activity == null ||
+                activity.isFinishing() ||
+                activity.isDestroyed() ||
+                !ValueAnimator.areAnimatorsEnabled()) {
+            return false;
+        }
+
+        long last = activity.getSharedPreferences(
+                DAILY_PREFS, Activity.MODE_PRIVATE
+        ).getLong(LAST_RUN, 0L);
+
+        if (last <= 0L) return true;
+
+        long now = System.currentTimeMillis();
+        return now >= last &&
+                now - last >= INTERVAL_MS;
     }
 
     // Пробежка никогда не блокирует магазин.
@@ -106,6 +127,18 @@ public final class CatWelcome {
 
         if (!ready) {
             host.postDelayed(waitForStore, 250L);
+            return;
+        }
+
+        // Count only an actual animation start.
+        boolean saved = activity.getSharedPreferences(
+                DAILY_PREFS, Activity.MODE_PRIVATE
+        ).edit().putLong(
+                LAST_RUN, System.currentTimeMillis()
+        ).commit();
+
+        if (!saved) {
+            finish();
             return;
         }
 

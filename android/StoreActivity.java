@@ -1,3 +1,4 @@
+// LAVKA_COMPACT_INTERFACE_V1
 // LAVKA_CLEAN_STORE_TEXT_V1
 package ru.makeevka.fishshop;
 
@@ -569,7 +570,7 @@ public class StoreActivity extends Activity {
         result.setOrientation(LinearLayout.VERTICAL);
         result.setPadding(dp(16), dp(16), dp(16), dp(16));
         result.setBackground(
-                surface(CARD, border ? GOLD : LINE, 20)
+                surface(CARD, border ? GOLD : 0, 20)
         );
         return result;
     }
@@ -1161,29 +1162,19 @@ public class StoreActivity extends Activity {
         homeSearch();
 
         LinearLayout hero = panel();
-        GradientDrawable gradient = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{
-                        Color.rgb(69, 57, 30),
-                        Color.rgb(34, 32, 26),
-                        CARD
-                }
+        hero.setPadding(
+                dp(14), dp(10),
+                dp(14), dp(10)
         );
-        gradient.setCornerRadius(dp(22));
-        hero.setBackground(gradient);
-
-        TextView label = bold("ЛАВКА ВКУСА · ВЫБИРАЙТЕ С УДОВОЛЬСТВИЕМ",
-                10, GOLD);
-        label.setLetterSpacing(0.07f);
-        hero.addView(label);
-        hero.addView(bold("Вкусные покупки\nначинаются здесь", 29, WHITE));
-        hero.addView(text(
-                "Рыба, морепродукты и раки\n" +
-                "для вашего стола. Оплата при получении.",
-                14, WHITE
+        hero.setBackground(
+                surface(CARD, 0, 18)
+        );
+        hero.addView(bold(
+                "К вашему столу", 21, WHITE
         ));
-        hero.addView(button(
-                "Открыть каталог  →", () -> openCatalog(false)
+        hero.addView(text(
+                "Рыба, морепродукты и раки",
+                13, MUTED
         ));
 
         LinearLayout deliveryCard = panel();
@@ -1208,7 +1199,7 @@ public class StoreActivity extends Activity {
         DeliveryTruckAnimation.install(deliveryCard);
         
 
-        sectionLink("Категории", "Все  →", () -> openCatalog(false));
+        section("Категории");
         categoryTiles();
 
         List<Product> sales = new ArrayList<>();
@@ -1221,16 +1212,6 @@ public class StoreActivity extends Activity {
                     () -> openCatalog(true));
             grid(new ArrayList<>(
                     sales.subList(0, Math.min(4, sales.size()))
-            ));
-        } else {
-            LinearLayout promo = panel();
-            promo.addView(bold("Специальные предложения", 19, GOLD));
-            promo.addView(text(
-                    "Когда в магазине появятся акции, " +
-                    "они будут доступны здесь.", 13, MUTED
-            ));
-            promo.addView(secondary(
-                    "Раздел акций", () -> openCatalog(true)
             ));
         }
 
@@ -1263,9 +1244,7 @@ public class StoreActivity extends Activity {
         pickup.addView(bold("Загляните в нашу лавку", 21, WHITE));
         pickup.addView(text(PICKUP, 14, MUTED));
 
-        content.addView(secondary(
-                "Обновить ассортимент", this::loadCatalog
-        ));
+        
     }
 
     private List<String> categories() {
