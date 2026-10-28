@@ -1,0 +1,120 @@
+name: Remove profile settings link
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Remove duplicate settings entry
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          store = Path("android/StoreActivity.java")
+          settings = Path("android/ShopSettings.java")
+
+          if not store.is_file() or not settings.is_file():
+              raise SystemExit(
+                  "Required Java file missing. No files changed."
+              )
+
+          source = store.read_text(encoding="utf-8")
+          settings_source = settings.read_text(encoding="utf-8")
+
+          if "LAVKA_FULLSCREEN_SETTINGS_V1" not in settings_source:
+              raise SystemExit(
+                  "Update ShopSettings.java first. No files changed."
+              )
+
+          if source.count("// LAVKA_SETTINGS_GEAR_V1") != 1:
+              raise SystemExit(
+                  "Header gear not found uniquely. No files changed."
+              )
+
+          block = '''        // LAVKA_SHOP_SETTINGS_LINK
+                  content.addView(secondary(
+                          "Настройки приложения  ›",
+                          () -> {
+                              if (this instanceof MainActivity) {
+                                  ((MainActivity) this).openShopSettings();
+                              }
+                          }
+                  ));
+          '''
+
+          # Remove YAML indentation from the embedded Java block.
+          # The first line has 8 Java spaces; following lines
+          # above deliberately include 8 additional spaces.
+          lines = block.splitlines(keepends=True)
+          block = lines[0] + "".join(
+              line[8:] if line.startswith("        ") else line
+              for line in lines[1:]
+          )
+
+          marker = "// LAVKA_SHOP_SETTINGS_LINK"
+
+          if marker not in source:
+              if source.count(".openShopSettings();") != 1:
+                  raise SystemExit(
+                      "Unexpected settings links. No files changed."
+                  )
+              print("Profile link already removed; header gear remains.")
+              raise SystemExit(0)
+
+          if source.count(block) != 1:
+              raise SystemExit(
+                  "Profile block differs. No files changed."
+              )
+
+          updated = source.replace(block, "", 1)
+
+          if marker in updated:
+              raise SystemExit(
+                  "Profile marker remains. No files changed."
+              )
+
+          if updated.count(".openShopSettings();") != 1:
+              raise SystemExit(
+                  "Unexpected remaining links. No files changed."
+              )
+
+          if updated.count("// LAVKA_SETTINGS_GEAR_V1") != 1:
+              raise SystemExit(
+                  "Gear verification failed. No files changed."
+              )
+
+          store.write_text(updated, encoding="utf-8")
+          print("Profile settings entry removed; header gear preserved.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          if git diff --quiet -- android/StoreActivity.java; then
+            echo "No new changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android/StoreActivity.java
+            git commit -m "Keep settings in header gear only"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
