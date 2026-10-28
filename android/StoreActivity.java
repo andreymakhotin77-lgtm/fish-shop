@@ -2465,16 +2465,6 @@ public class StoreActivity extends Activity {
     private void showProfile() {
         section("Мой профиль");
 
-        // LAVKA_SHOP_SETTINGS_LINK
-        content.addView(secondary(
-                "Настройки приложения  ›",
-                () -> {
-                    if (this instanceof MainActivity) {
-                        ((MainActivity) this).openShopSettings();
-                    }
-                }
-        ));
-
         LinearLayout greeting = panel();
         greeting.addView(bold(
                 customerName.isEmpty()
