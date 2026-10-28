@@ -1198,6 +1198,9 @@ public class StoreActivity extends Activity {
                 deliveryText, new LinearLayout.LayoutParams(0, -2, 1)
         );
         deliveryCard.addView(deliveryRow);
+
+        // LAVKA_DELIVERY_TRUCK_V1
+        DeliveryTruckAnimation.install(deliveryCard);
         
 
         sectionLink("Категории", "Все  →", () -> openCatalog(false));
