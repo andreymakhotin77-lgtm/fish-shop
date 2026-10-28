@@ -1,0 +1,703 @@
+name: Polish shop interface
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: polish-shop-interface
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update shop interface
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          store_path = Path("android/StoreActivity.java")
+          settings_path = Path("android/ShopSettings.java")
+
+          STORE_MARKER = "// LAVKA_POLISHED_STORE_V1"
+          SETTINGS_MARKER = "// LAVKA_POLISHED_SETTINGS_V1"
+
+          def fail(message):
+              raise SystemExit(message + " No files changed.")
+
+          for path in (store_path, settings_path):
+              if not path.is_file():
+                  fail("Missing file: " + str(path))
+
+          store = store_path.read_text(encoding="utf-8")
+          settings = settings_path.read_text(encoding="utf-8")
+
+          def once(source, old, new, label):
+              count = source.count(old)
+              if count != 1:
+                  fail(label + ": expected one match, found " + str(count))
+              return source.replace(old, new, 1)
+
+          def flexible(source, old, new, label):
+              tokens = re.split(r"(\s+)", old.strip())
+              pattern = "".join(
+                  r"\s+" if token.isspace() else re.escape(token)
+                  for token in tokens if token
+              )
+              matches = list(re.finditer(pattern, source))
+              if len(matches) != 1:
+                  fail(label + ": expected one match, found " + str(len(matches)))
+              match = matches[0]
+              return source[:match.start()] + new + source[match.end():]
+
+          def section(source, start, end, transform, label):
+              if source.count(start) != 1 or source.count(end) != 1:
+                  fail(label + ": method boundaries differ.")
+              first = source.index(start)
+              last = source.index(end)
+              if last <= first:
+                  fail(label + ": unexpected method order.")
+              return source[:first] + transform(source[first:last]) + source[last:]
+
+          if STORE_MARKER in store or SETTINGS_MARKER in settings:
+              if STORE_MARKER in store and SETTINGS_MARKER in settings:
+                  print("Interface update already installed.")
+                  raise SystemExit(0)
+              fail("Only one file has the update marker.")
+
+          if "LAVKA_FULLSCREEN_SETTINGS_V1" not in settings:
+              fail("Fullscreen settings required.")
+
+          checkout = "summary.addView(text(DELIVERY, 13, MUTED));"
+          if store.count(checkout) != 1:
+              fail("Checkout delivery text differs.")
+
+          updated_store = store
+          updated_settings = settings
+
+          # HOME: do not repeat products from the visible sale selection.
+          def home_edit(block):
+              block = flexible(
+                  block,
+                  '''
+                  if (!sales.isEmpty()) {
+                      sectionLink("Выгодные предложения", "Все  →",
+                              () -> openCatalog(true));
+                      grid(new ArrayList<>(
+                              sales.subList(0, Math.min(4, sales.size()))
+                      ));
+                  }
+
+                  sectionLink("Выбирайте к столу", "Каталог  →",
+                          () -> openCatalog(false));
+                  grid(new ArrayList<>(
+                          products.subList(0, Math.min(6, products.size()))
+                  ));
+                  ''',
+                  r'''
+                  Set<String> shownOnHome = new HashSet<>();
+
+                  if (!sales.isEmpty()) {
+                      List<Product> featuredSales = new ArrayList<>(
+                              sales.subList(0, Math.min(4, sales.size()))
+                      );
+
+                      for (Product p : featuredSales) {
+                          shownOnHome.add(p.id);
+                      }
+
+                      sectionLink(
+                              "Выгодные предложения", "Все  →",
+                              () -> openCatalog(true)
+                      );
+                      grid(featuredSales);
+                  }
+
+                  List<Product> otherProducts = new ArrayList<>();
+                  for (Product p : products) {
+                      if (shownOnHome.contains(p.id)) continue;
+                      otherProducts.add(p);
+                      if (otherProducts.size() == 6) break;
+                  }
+
+                  if (!otherProducts.isEmpty()) {
+                      sectionLink(
+                              "Выбирайте к столу", "Каталог  →",
+                              () -> openCatalog(false)
+                      );
+                      grid(otherProducts);
+                  }
+                  ''',
+                  "Home product selections"
+              )
+              return block
+
+          updated_store = section(
+              updated_store,
+              "    private void showHome() {",
+              "    private List<String> categories() {",
+              home_edit,
+              "Home"
+          )
+
+          # CATALOG: compact sale switch and conditional reset.
+          def catalog_edit(block):
+              return flexible(
+                  block,
+                  '''
+                  content.addView(secondary(
+                      promotionsOnly ? "Показать все товары" : "Только акции",
+                      () -> {
+                          search = query.getText().toString().trim();
+                          promotionsOnly = !promotionsOnly;
+                          redraw();
+                      }
+                  ));
+
+                  if (!search.isEmpty() || !category.isEmpty() || promotionsOnly) {
+                      content.addView(secondary("Сбросить фильтры", () -> {
+                          search = "";
+                          category = "";
+                          promotionsOnly = false;
+                          redraw();
+                      }));
+                  }
+                  ''',
+                  r'''
+                  LinearLayout filters = new LinearLayout(this);
+                  filters.setGravity(Gravity.CENTER_VERTICAL);
+                  filters.setPadding(0, dp(3), 0, dp(3));
+
+                  Switch saleSwitch = new Switch(this);
+                  saleSwitch.setText("Только акции");
+                  saleSwitch.setTextSize(14);
+                  saleSwitch.setTextColor(WHITE);
+                  saleSwitch.setMinHeight(dp(48));
+                  saleSwitch.setPadding(0, 0, dp(10), 0);
+                  saleSwitch.setThumbTintList(
+                          ColorStateList.valueOf(GOLD)
+                  );
+                  saleSwitch.setTrackTintList(
+                          new ColorStateList(
+                                  new int[][]{
+                                          new int[]{
+                                                  android.R.attr.state_checked
+                                          },
+                                          new int[]{}
+                                  },
+                                  new int[]{
+                                          Color.rgb(103, 86, 35),
+                                          LINE
+                                  }
+                          )
+                  );
+                  saleSwitch.setChecked(promotionsOnly);
+
+                  filters.addView(
+                          saleSwitch,
+                          new LinearLayout.LayoutParams(0, -2, 1)
+                  );
+
+                  saleSwitch.setOnCheckedChangeListener((v, checked) -> {
+                      search = query.getText().toString().trim();
+                      promotionsOnly = checked;
+                      redraw();
+                  });
+
+                  if (!search.isEmpty() ||
+                          !category.isEmpty() ||
+                          promotionsOnly) {
+                      TextView reset = bold("Сбросить", 13, GOLD);
+                      reset.setGravity(Gravity.CENTER);
+                      reset.setMinHeight(dp(48));
+                      reset.setPadding(dp(12), 0, dp(4), 0);
+                      reset.setContentDescription("Сбросить фильтры");
+                      reset.setFocusable(true);
+                      reset.setOnClickListener(v -> {
+                          search = "";
+                          category = "";
+                          promotionsOnly = false;
+                          redraw();
+                      });
+                      filters.addView(
+                              reset,
+                              new LinearLayout.LayoutParams(-2, -2)
+                      );
+                  }
+
+                  content.addView(filters);
+                  ''',
+                  "Catalog filters"
+              )
+
+          updated_store = section(
+              updated_store,
+              "    private void showCatalog(boolean onlyFavorites) {",
+              "    private void emptyState(",
+              catalog_edit,
+              "Catalog"
+          )
+
+          # Category changes preserve the sale filter.
+          updated_store = once(
+              updated_store,
+              'Button chip = secondary(title, () -> openCategory(value));',
+              r'''Button chip = secondary(title, () -> {
+                  saveProfile();
+                  category = value;
+                  tab = 1;
+                  showingHistory = false;
+                  render(false);
+              });''',
+              "Category filter action"
+          )
+
+          updated_store = once(
+              updated_store,
+              'if (category.equals(value) && !promotionsOnly) {',
+              'if (category.equals(value)) {',
+              "Selected category appearance"
+          )
+
+          # Short category names only in product tiles.
+          category_helper = r'''
+              private String compactCategory(String value) {
+                  if (value == null) return "";
+
+                  String lower = value.toLowerCase(Locale.ROOT);
+
+                  if (lower.contains("вялен") || lower.contains("вялен") ||
+                          lower.contains("сушён") || lower.contains("сушен")) {
+                      return "Вяленая и сушёная рыба";
+                  }
+
+                  if (lower.contains("копч")) {
+                      return "Копчёная рыба";
+                  }
+
+                  return value;
+              }
+
+          '''
+
+          updated_store = once(
+              updated_store,
+              "    private LinearLayout productCard(Product p) {",
+              category_helper +
+              "    private LinearLayout productCard(Product p) {",
+              "Compact category helper"
+          )
+
+          updated_store = once(
+              updated_store,
+              'TextView group = text(p.category, 10, MUTED);',
+              '''TextView group = text(compactCategory(p.category), 10, MUTED);
+                  group.setContentDescription(p.category);''',
+              "Product category label"
+          )
+
+          # Keep two lines for names and expose full text to accessibility.
+          def card_edit(block):
+              return once(
+                  block,
+                  'TextView name = bold(p.name, 15, WHITE);',
+                  '''TextView name = bold(p.name, 15, WHITE);
+                  name.setContentDescription("Товар: " + p.name);''',
+                  "Product name accessibility"
+              )
+
+          updated_store = section(
+              updated_store,
+              "    private LinearLayout productCard(Product p) {",
+              "    private void showProduct(Product p) {",
+              card_edit,
+              "Product card"
+          )
+
+          # Delivery progress is relevant in checkout, not in profile.
+          def city_edit(block):
+              return flexible(
+                  block,
+                  '''
+                  parent.addView(text(
+                      deliveryHint(city, total()), 13, MUTED
+                  ));
+                  ''',
+                  r'''
+                  if (tab == 3) {
+                      parent.addView(text(
+                              deliveryHint(city, total()), 13, MUTED
+                      ));
+                  }
+                  ''',
+                  "Profile delivery progress"
+              )
+
+          updated_store = section(
+              updated_store,
+              "    private void cityFields(LinearLayout parent) {",
+              "    private void customerFields(LinearLayout parent, boolean order) {",
+              city_edit,
+              "City fields"
+          )
+
+          # PROFILE: remove repeated notices, keep saved order data intact.
+          def profile_edit(block):
+              block = flexible(
+                  block,
+                  '''
+                  orders.addView(text(
+                      "После удаления приложения история и ключи " +
+                      "просмотра заказов не восстановятся.",
+                      12, MUTED
+                  ));
+                  ''',
+                  "",
+                  "History storage notice"
+              )
+
+              block = flexible(
+                  block,
+                  '''
+                  profile.addView(text(
+                      "Хранятся на этом телефоне. " +
+                      "Регистрация на сервере не используется.",
+                      12, MUTED
+                  ));
+                  ''',
+                  "",
+                  "Profile storage explanation"
+              )
+
+              block = flexible(
+                  block,
+                  '''
+                  LinearLayout conditions = panel();
+
+                  conditions.addView(text(
+                      "Даты и интервалы — по московскому времени. " +
+                      "Детали заказа подтверждает продавец.",
+                      13, MUTED
+                  ));
+                  ''',
+                  "",
+                  "Profile footer explanation"
+              )
+
+              block = once(
+                  block,
+                  'orders.addView(text(last, 14, MUTED));',
+                  r'''orders.addView(text(
+                          last.replace("\nМосковское время, UTC+3.", ""),
+                          14, MUTED
+                  ));''',
+                  "Last order display"
+              )
+              return block
+
+          updated_store = section(
+              updated_store,
+              "    private void showProfile() {",
+              "    private String statusName(String value) {",
+              profile_edit,
+              "Profile"
+          )
+
+          # SETTINGS: preserve existing public API and owner verification.
+          settings_main = r'''
+              private static void mainContent(
+                      Activity activity,
+                      Actions actions,
+                      Dialog dialog,
+                      LinearLayout root,
+                      LinearLayout body
+              ) {
+                  boolean enabled = protectionEnabled(activity);
+
+                  heading(activity, body, "Безопасность");
+
+                  settingsRow(
+                          activity, body,
+                          "Защита входа",
+                          enabled ? "Включена" : "Отключена",
+                          () -> {
+                              dialog.dismiss();
+                              if (enabled) {
+                                  actions.disableProtection();
+                              } else {
+                                  actions.enableProtection();
+                              }
+                          }
+                  );
+
+                  settingsRow(
+                          activity, body,
+                          "Повторная блокировка",
+                          delayLabel(lockAfterMillis(activity)),
+                          () -> render(
+                                  activity, actions, dialog, root, true
+                          )
+                  );
+
+                  description(
+                          activity, body,
+                          "Биометрия и код телефона не передаются магазину. " +
+                          "При новом запуске включённая защита проверяется снова."
+                  );
+
+                  heading(activity, body, "Уведомления");
+
+                  settingsRow(
+                          activity, body,
+                          "Уведомления о заказах",
+                          notificationsEnabled(activity)
+                                  ? "Разрешены" : "Отключены",
+                          () -> {
+                              dialog.dismiss();
+                              openNotifications(activity);
+                          }
+                  );
+
+                  heading(activity, body, "Данные покупателя");
+
+                  settingsRow(
+                          activity, body,
+                          "Изменить мои данные",
+                          "",
+                          () -> {
+                              dialog.dismiss();
+                              actions.editCustomerData();
+                          }
+                  );
+
+                  heading(activity, body, "О приложении");
+
+                  description(
+                          activity, body,
+                          "Лавка Вкуса\nВерсия: " + version(activity)
+                  );
+
+                  TextView dataNotice = label(
+                          activity,
+                          "Имя, телефон и адрес для автозаполнения, " +
+                          "корзина, избранное и история хранятся " +
+                          "на этом телефоне.\n\n" +
+                          "При оформлении заказа его данные передаются " +
+                          "магазину и сохраняются на сервере. " +
+                          "Изменение профиля не меняет уже оформленные заказы.\n\n" +
+                          "При удалении приложения или очистке его данных " +
+                          "локальная история и ключи просмотра будут потеряны. " +
+                          "Автоматического восстановления истории " +
+                          "на другом телефоне сейчас нет.\n\n" +
+                          "Для обновления устанавливайте новый APK поверх " +
+                          "приложения, без удаления.",
+                          14, MUTED
+                  );
+
+                  dataNotice.setPadding(
+                          dp(activity, 12), dp(activity, 10),
+                          dp(activity, 12), dp(activity, 16)
+                  );
+                  dataNotice.setVisibility(android.view.View.GONE);
+
+                  TextView dataLink = settingsRow(
+                          activity, body,
+                          "О данных",
+                          "Хранение и история заказов",
+                          () -> {
+                              boolean opening = dataNotice.getVisibility()
+                                      != android.view.View.VISIBLE;
+                              dataNotice.setVisibility(
+                                      opening
+                                              ? android.view.View.VISIBLE
+                                              : android.view.View.GONE
+                              );
+                          }
+                  );
+                  dataLink.setContentDescription(
+                          "О данных. Показать или скрыть сведения " +
+                          "о хранении данных и истории заказов."
+                  );
+
+                  body.addView(
+                          dataNotice,
+                          new LinearLayout.LayoutParams(-1, -2)
+                  );
+              }
+
+              private static TextView settingsRow(
+                      Activity activity,
+                      LinearLayout parent,
+                      String title,
+                      String value,
+                      Runnable action
+              ) {
+                  LinearLayout row = new LinearLayout(activity);
+                  row.setOrientation(LinearLayout.HORIZONTAL);
+                  row.setGravity(Gravity.CENTER_VERTICAL);
+                  row.setMinimumHeight(dp(activity, 64));
+                  row.setPadding(
+                          dp(activity, 14), dp(activity, 12),
+                          dp(activity, 14), dp(activity, 12)
+                  );
+
+                  GradientDrawable normal =
+                          surface(activity, CARD, 0, 14);
+
+                  row.setBackground(
+                          new android.graphics.drawable.RippleDrawable(
+                                  android.content.res.ColorStateList.valueOf(
+                                          Color.argb(45, 212, 175, 55)
+                                  ),
+                                  normal,
+                                  surface(activity, Color.WHITE, 0, 14)
+                          )
+                  );
+
+                  LinearLayout labels = new LinearLayout(activity);
+                  labels.setOrientation(LinearLayout.VERTICAL);
+
+                  TextView name = label(activity, title, 16, WHITE);
+                  labels.addView(name);
+
+                  if (value != null && !value.isEmpty()) {
+                      TextView detail = label(activity, value, 13, MUTED);
+                      detail.setPadding(0, dp(activity, 3), 0, 0);
+                      labels.addView(detail);
+                  }
+
+                  labels.setImportantForAccessibility(
+                          android.view.View
+                                  .IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                  );
+
+                  row.addView(
+                          labels,
+                          new LinearLayout.LayoutParams(0, -2, 1)
+                  );
+
+                  TextView arrow = label(activity, "›", 27, GOLD);
+                  arrow.setPadding(dp(activity, 12), 0, 0, 0);
+                  arrow.setImportantForAccessibility(
+                          android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                  );
+                  row.addView(arrow);
+
+                  row.setFocusable(true);
+                  row.setContentDescription(
+                          title +
+                          (value == null || value.isEmpty()
+                                  ? "" : ". " + value)
+                  );
+                  row.setOnClickListener(view -> action.run());
+
+                  LinearLayout.LayoutParams params =
+                          new LinearLayout.LayoutParams(-1, -2);
+                  params.setMargins(
+                          0, dp(activity, 4), 0, dp(activity, 4)
+                  );
+                  parent.addView(row, params);
+
+                  return row;
+              }
+
+          '''
+
+          # Return the clickable row so its accessibility text can be updated.
+          settings_main = settings_main.replace(
+              "TextView dataLink = settingsRow(",
+              "LinearLayout dataLink = settingsRow("
+          ).replace(
+              "private static TextView settingsRow(",
+              "private static LinearLayout settingsRow("
+          )
+
+          updated_settings = section(
+              updated_settings,
+              "    private static void mainContent(",
+              "    private static void delayContent(",
+              lambda old: settings_main,
+              "Settings main screen"
+          )
+
+          # No duplicate predicate in the generated category helper.
+          updated_store = updated_store.replace(
+              'lower.contains("вялен") || lower.contains("вялен") ||',
+              'lower.contains("вялен") ||'
+          )
+
+          # Critical checks before either file is written.
+          if updated_store.count(checkout) != 1:
+              fail("Checkout delivery text affected.")
+
+          if 'name.setMinLines(2);' not in updated_store:
+              fail("Product title alignment missing.")
+
+          if 'name.setMaxLines(2);' not in updated_store:
+              fail("Product title line limit missing.")
+
+          for anchor in (
+              'prefs = getPreferences(MODE_PRIVATE);',
+              'private void showHistory() {',
+              'private void showCart() {',
+              'protected boolean isHomeForCat()',
+              'ProductMotion.Flight motionFlight',
+          ):
+              if anchor not in updated_store:
+                  fail("Required store feature missing: " + anchor)
+
+          for anchor in (
+              'void enableProtection();',
+              'void disableProtection();',
+              'void editCustomerData();',
+              'private static final String PREFS =',
+              '"lavka_device_lock_v1"',
+              'private static void delayContent(',
+              'actions.disableProtection();',
+              'actions.enableProtection();',
+          ):
+              if anchor not in updated_settings:
+                  fail("Required settings feature missing: " + anchor)
+
+          # All checks have passed. Write both results.
+          updated_store = STORE_MARKER + "\n" + updated_store
+          updated_settings = SETTINGS_MARKER + "\n" + updated_settings
+
+          store_path.write_text(updated_store, encoding="utf-8")
+          settings_path.write_text(updated_settings, encoding="utf-8")
+
+          print("SUCCESS: home, catalog, cards, profile and settings updated.")
+          print("Checkout delivery terms preserved.")
+          print("No storage keys or server files changed.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          if git diff --quiet -- android/StoreActivity.java android/ShopSettings.java; then
+            echo "No new changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android/StoreActivity.java android/ShopSettings.java
+            git commit -m "Polish shop home catalog profile and settings"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
