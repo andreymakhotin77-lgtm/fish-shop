@@ -4,21 +4,32 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.RadialGradient;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
 import android.view.animation.AccelerateDecelerateInterpolator;
-import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+/*
+ * Загрузочный экран «Жидкое золото».
+ *
+ * Объём имитируется обычным рисованием Canvas:
+ * градиенты, толщина медальона, блики и мягкое движение.
+ *
+ * Дополнительные библиотеки и изображения не нужны.
+ * Искусственной задержки перед открытием магазина нет.
+ */
 public final class BrandLoading {
 
     private static final int BLACK =
@@ -33,33 +44,24 @@ public final class BrandLoading {
     private static final int MUTED =
             Color.rgb(166, 167, 163);
 
-    private static final long EXIT_DURATION = 360L;
+    private static final long EXIT_DURATION = 420L;
 
     private final Activity activity;
     private final FrameLayout host;
     private final FrameLayout overlay;
     private final View underlying;
+
     private final int previousAccessibility;
 
-    private final TextView logo;
-    private final TextView title;
+    private final GoldScene scene;
     private final TextView status;
     private final TextView hint;
-
-    private final Wave wave;
 
     private final Button retryButton;
     private final Button continueButton;
 
     private final Runnable retry;
 
-    /*
-     * finished — загрузочный экран больше не принимает
-     * изменения состояния.
-     *
-     * removed — экран действительно удалён из окна.
-     * Между этими состояниями идёт плавное исчезновение.
-     */
     private boolean finished;
     private boolean removed;
     private boolean loading;
@@ -86,9 +88,11 @@ public final class BrandLoading {
 
                     hint.setText(
                             "После перерыва подключение может " +
-                            "занять около минуты. Заказы и история " +
-                            "остаются на месте."
+                            "занять около минуты. " +
+                            "Можно немного подождать."
                     );
+
+                    continueButton.setVisibility(View.VISIBLE);
                 }
             };
 
@@ -96,6 +100,12 @@ public final class BrandLoading {
             Activity activity,
             Runnable retry
     ) {
+        if (activity == null || retry == null) {
+            throw new IllegalArgumentException(
+                    "Не заданы Activity или действие повтора."
+            );
+        }
+
         this.activity = activity;
         this.retry = retry;
 
@@ -129,61 +139,36 @@ public final class BrandLoading {
                 View.OVER_SCROLL_NEVER
         );
 
-        LinearLayout content =
-                new LinearLayout(activity);
+        LinearLayout body = new LinearLayout(activity);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setGravity(Gravity.CENTER);
 
-        content.setOrientation(
-                LinearLayout.VERTICAL
+        body.setPadding(
+                dp(24), dp(24),
+                dp(24), dp(28)
         );
 
-        content.setGravity(Gravity.CENTER);
-
-        content.setPadding(
-                dp(24), dp(32),
-                dp(24), dp(32)
+        TextView signature = label(
+                "Л А В К А   В К У С А",
+                11,
+                GOLD
         );
 
-        // -------------------- ЛОГОТИП --------------------
+        body.addView(signature);
 
-        logo = label("ЛВ", 52, GOLD);
+        scene = new GoldScene(activity);
+        scene.setImportantForAccessibility(
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        );
 
-        logo.setTypeface(
-                Typeface.create(
-                        "serif",
-                        Typeface.BOLD
+        body.addView(
+                scene,
+                new LinearLayout.LayoutParams(
+                        -1, dp(280)
                 )
         );
 
-        logo.setPadding(0, 0, 0, 0);
-        logo.setContentDescription("Лавка Вкуса");
-
-        GradientDrawable ring =
-                new GradientDrawable();
-
-        ring.setShape(GradientDrawable.OVAL);
-
-        ring.setColor(
-                Color.rgb(23, 24, 26)
-        );
-
-        ring.setStroke(dp(1), GOLD);
-
-        logo.setBackground(ring);
-
-        LinearLayout.LayoutParams logoParams =
-                new LinearLayout.LayoutParams(
-                        dp(136), dp(136)
-                );
-
-        logoParams.setMargins(
-                0, 0, 0, dp(24)
-        );
-
-        content.addView(logo, logoParams);
-
-        // -------------------- НАЗВАНИЕ --------------------
-
-        title = label(
+        TextView title = label(
                 "Лавка Вкуса",
                 29,
                 WHITE
@@ -196,38 +181,15 @@ public final class BrandLoading {
                 )
         );
 
-        content.addView(title);
+        body.addView(title);
 
         TextView slogan = label(
-                "Вкусные покупки\nначинаются здесь",
-                16,
+                "Вкусные покупки начинаются здесь",
+                14,
                 MUTED
         );
 
-        slogan.setLineSpacing(dp(4), 1);
-
-        content.addView(slogan);
-
-        // -------------------- ВОЛНА --------------------
-
-        wave = new Wave(activity);
-
-        wave.setImportantForAccessibility(
-                View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        );
-
-        LinearLayout.LayoutParams waveParams =
-                new LinearLayout.LayoutParams(
-                        -1, dp(76)
-                );
-
-        waveParams.setMargins(
-                0, dp(24), 0, dp(10)
-        );
-
-        content.addView(wave, waveParams);
-
-        // -------------------- СОСТОЯНИЕ --------------------
+        body.addView(slogan);
 
         status = label(
                 "Загружаем ассортимент…",
@@ -235,11 +197,15 @@ public final class BrandLoading {
                 GOLD
         );
 
+        status.setPadding(
+                0, dp(24), 0, dp(6)
+        );
+
         status.setAccessibilityLiveRegion(
                 View.ACCESSIBILITY_LIVE_REGION_POLITE
         );
 
-        content.addView(status);
+        body.addView(status);
 
         hint = label(
                 "Подключаемся к магазину",
@@ -247,9 +213,7 @@ public final class BrandLoading {
                 MUTED
         );
 
-        content.addView(hint);
-
-        // -------------------- ПОВТОР --------------------
+        body.addView(hint);
 
         retryButton = makeButton(
                 "Повторить подключение",
@@ -260,94 +224,44 @@ public final class BrandLoading {
 
                     setLoading();
                     this.retry.run();
-                }
+                },
+                false
         );
 
         retryButton.setVisibility(View.GONE);
-        content.addView(retryButton);
-
-        // -------------------- ВХОД БЕЗ КАТАЛОГА --------------------
+        body.addView(retryButton);
 
         continueButton = makeButton(
                 "Открыть магазин без каталога",
-                this::finish
+                this::finish,
+                true
         );
 
-        continueButton.setTextColor(GOLD);
-
-        GradientDrawable secondary =
-                new GradientDrawable();
-
-        secondary.setColor(BLACK);
-        secondary.setCornerRadius(dp(14));
-        secondary.setStroke(dp(1), GOLD);
-
-        continueButton.setBackground(secondary);
         continueButton.setVisibility(View.GONE);
-
-        content.addView(continueButton);
+        body.addView(continueButton);
 
         scroll.addView(
-                content,
-                new ScrollView.LayoutParams(
-                        -1, -1
-                )
+                body,
+                new ScrollView.LayoutParams(-1, -1)
         );
 
         overlay.addView(
                 scroll,
-                new FrameLayout.LayoutParams(
-                        -1, -1
-                )
+                new FrameLayout.LayoutParams(-1, -1)
         );
 
+        /*
+         * Не вызываем bringToFront():
+         * экран защиты входа должен оставаться выше
+         * загрузочного экрана, если он уже отображается.
+         */
         host.addView(
                 overlay,
-                new FrameLayout.LayoutParams(
-                        -1, -1
-                )
+                new FrameLayout.LayoutParams(-1, -1)
         );
-
-        animateEntrance();
     }
 
-    // -------------------- МЯГКОЕ ПОЯВЛЕНИЕ --------------------
-
-    private void animateEntrance() {
-        if (!ValueAnimator.areAnimatorsEnabled()) {
-            return;
-        }
-
-        logo.setAlpha(0f);
-        logo.setScaleX(0.96f);
-        logo.setScaleY(0.96f);
-        logo.setTranslationY(dp(6));
-
-        logo.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .translationY(0f)
-                .setDuration(500L)
-                .setInterpolator(
-                        new DecelerateInterpolator()
-                )
-                .start();
-
-        title.setAlpha(0f);
-        title.setTranslationY(dp(5));
-
-        title.animate()
-                .alpha(1f)
-                .translationY(0f)
-                .setDuration(450L)
-                .setInterpolator(
-                        new DecelerateInterpolator()
-                )
-                .start();
-    }
-
-    // -------------------- ОБНОВЛЕНИЕ СОСТОЯНИЯ --------------------
+    // ==================== СОСТОЯНИЕ ====================
 
     public void update(
             boolean busy,
@@ -387,45 +301,25 @@ public final class BrandLoading {
         wasLoading = true;
         failed = false;
 
-        status.setText(
-                "Загружаем ассортимент…"
-        );
-
-        hint.setText(
-                "Подключаемся к магазину"
-        );
+        status.setText("Загружаем ассортимент…");
+        hint.setText("Подключаемся к магазину");
 
         retryButton.setVisibility(View.GONE);
         continueButton.setVisibility(View.GONE);
 
-        wave.setVisibility(View.VISIBLE);
-        wave.invalidate();
+        scene.invalidate();
 
         overlay.removeCallbacks(slowMessage);
-
-        overlay.postDelayed(
-                slowMessage,
-                12000L
-        );
+        overlay.postDelayed(slowMessage, 12000L);
     }
 
     public boolean isBlocking() {
-        /*
-         * Во время исчезновения экран ещё
-         * перехватывает нажатия.
-         */
         return !removed;
     }
 
     public boolean isFinished() {
-        /*
-         * Для восстановления Activity считаем
-         * завершённым и уже начатый переход.
-         */
         return finished;
     }
-
-    // -------------------- ОШИБКА --------------------
 
     public void showError(String message) {
         if (finished || removed) {
@@ -448,13 +342,17 @@ public final class BrandLoading {
                         : message
         );
 
-        wave.setVisibility(View.INVISIBLE);
-
         retryButton.setVisibility(View.VISIBLE);
         continueButton.setVisibility(View.VISIBLE);
+
+        /*
+         * При ошибке останавливаем движение.
+         * Медальон остаётся видимым.
+         */
+        scene.invalidate();
     }
 
-    // -------------------- ПЛАВНЫЙ ПЕРЕХОД --------------------
+    // ==================== ПЕРЕХОД ====================
 
     public void finish() {
         if (finished || removed) {
@@ -469,24 +367,17 @@ public final class BrandLoading {
         retryButton.setEnabled(false);
         continueButton.setEnabled(false);
 
-        /*
-         * Никакой дополнительной паузы:
-         * начинаем открывать магазин сразу.
-         */
-        if (
-                !ValueAnimator.areAnimatorsEnabled() ||
+        if (!ValueAnimator.areAnimatorsEnabled() ||
                 !overlay.isAttachedToWindow() ||
                 activity.isFinishing() ||
-                activity.isDestroyed()
-        ) {
+                activity.isDestroyed()) {
             removeOverlay();
             return;
         }
 
         /*
-         * Волна продолжает двигаться при исчезновении.
-         * Нижний экран не масштабируется:
-         * текст и фотографии остаются чёткими.
+         * Открываем магазин сразу после готовности.
+         * Не масштабируем основной интерфейс.
          */
         overlay.animate()
                 .alpha(0f)
@@ -497,11 +388,6 @@ public final class BrandLoading {
                 .withEndAction(removeAfterFade)
                 .start();
 
-        /*
-         * Страховка на случай прерывания анимации.
-         * Это не задержка открытия — удаление обычно
-         * выполняется в конце анимации выше.
-         */
         overlay.postDelayed(
                 removeAfterFade,
                 EXIT_DURATION + 150L
@@ -523,9 +409,6 @@ public final class BrandLoading {
         overlay.animate().withEndAction(null);
         overlay.animate().cancel();
 
-        logo.animate().cancel();
-        title.animate().cancel();
-
         if (underlying != null) {
             underlying.setImportantForAccessibility(
                     previousAccessibility
@@ -538,14 +421,10 @@ public final class BrandLoading {
     }
 
     public void dispose() {
-        /*
-         * При уничтожении Activity убираем всё сразу,
-         * без незавершённых анимаций и отложенных действий.
-         */
         removeOverlay();
     }
 
-    // -------------------- ЭЛЕМЕНТЫ ОФОРМЛЕНИЯ --------------------
+    // ==================== ОФОРМЛЕНИЕ ====================
 
     private TextView label(
             String text,
@@ -553,12 +432,10 @@ public final class BrandLoading {
             int color
     ) {
         TextView result = new TextView(activity);
-
         result.setText(text);
         result.setTextSize(size);
         result.setTextColor(color);
         result.setGravity(Gravity.CENTER);
-
         result.setPadding(
                 0, dp(5), 0, dp(5)
         );
@@ -568,14 +445,16 @@ public final class BrandLoading {
 
     private Button makeButton(
             String text,
-            Runnable action
+            Runnable action,
+            boolean secondary
     ) {
         Button result = new Button(activity);
-
         result.setText(text);
         result.setAllCaps(false);
         result.setTextSize(14);
-        result.setTextColor(BLACK);
+        result.setTextColor(
+                secondary ? GOLD : BLACK
+        );
 
         result.setMinHeight(dp(48));
         result.setMinimumHeight(dp(48));
@@ -588,8 +467,15 @@ public final class BrandLoading {
         GradientDrawable background =
                 new GradientDrawable();
 
-        background.setColor(GOLD);
+        background.setColor(
+                secondary ? BLACK : GOLD
+        );
+
         background.setCornerRadius(dp(14));
+
+        if (secondary) {
+            background.setStroke(dp(1), GOLD);
+        }
 
         result.setBackgroundTintList(null);
         result.setBackground(background);
@@ -600,16 +486,13 @@ public final class BrandLoading {
         );
 
         LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(
-                        -1, -2
-                );
+                new LinearLayout.LayoutParams(-1, -2);
 
         params.setMargins(
                 0, dp(10), 0, 0
         );
 
         result.setLayoutParams(params);
-
         return result;
     }
 
@@ -621,28 +504,120 @@ public final class BrandLoading {
         );
     }
 
-    // -------------------- ЗОЛОТАЯ ВОЛНА --------------------
+    // ==================== ЗОЛОТАЯ СЦЕНА ====================
 
-    private final class Wave extends View {
+    private final class GoldScene extends View {
 
-        private static final long CYCLE_MS = 7200L;
+        private static final long CYCLE_MS = 8400L;
+
+        /*
+         * Логическая сцена 360 × 300.
+         * Масштабируется под доступный размер View.
+         */
+        private static final float SCENE_WIDTH = 360f;
+        private static final float SCENE_HEIGHT = 300f;
 
         private final Paint paint =
                 new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        private final Path path = new Path();
+        private final Paint letters =
+                new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private final Path wavePath = new Path();
+
+        private final Shader metal;
+        private final Shader darkMetal;
+        private final Shader glow;
+        private final Shader shadow;
+        private final Shader letterGold;
 
         private final long started =
                 SystemClock.uptimeMillis();
 
-        Wave(Activity activity) {
-            super(activity);
+        GoldScene(Activity owner) {
+            super(owner);
+
+            setWillNotDraw(false);
 
             /*
-             * Не включаем программный слой:
-             * обычного рисования View достаточно.
+             * Градиенты создаются один раз,
+             * а не заново для каждого кадра.
              */
-            setWillNotDraw(false);
+            metal = new LinearGradient(
+                    95f, 45f,
+                    258f, 211f,
+                    new int[]{
+                            Color.rgb(109, 75, 22),
+                            Color.rgb(229, 190, 82),
+                            Color.rgb(255, 237, 171),
+                            Color.rgb(188, 139, 41),
+                            Color.rgb(92, 60, 19)
+                    },
+                    new float[]{
+                            0f, 0.27f, 0.43f, 0.68f, 1f
+                    },
+                    Shader.TileMode.CLAMP
+            );
+
+            darkMetal = new LinearGradient(
+                    110f, 55f,
+                    245f, 195f,
+                    new int[]{
+                            Color.rgb(56, 48, 30),
+                            Color.rgb(27, 28, 29),
+                            Color.rgb(15, 17, 20)
+                    },
+                    null,
+                    Shader.TileMode.CLAMP
+            );
+
+            glow = new RadialGradient(
+                    180f, 122f,
+                    133f,
+                    new int[]{
+                            Color.argb(42, 212, 175, 55),
+                            Color.argb(13, 212, 175, 55),
+                            Color.TRANSPARENT
+                    },
+                    new float[]{0f, 0.58f, 1f},
+                    Shader.TileMode.CLAMP
+            );
+
+            shadow = new RadialGradient(
+                    180f, 222f,
+                    92f,
+                    new int[]{
+                            Color.argb(150, 0, 0, 0),
+                            Color.TRANSPARENT
+                    },
+                    null,
+                    Shader.TileMode.CLAMP
+            );
+
+            letterGold = new LinearGradient(
+                    135f, 80f,
+                    222f, 153f,
+                    new int[]{
+                            Color.rgb(255, 238, 181),
+                            Color.rgb(229, 193, 100),
+                            Color.rgb(159, 111, 28)
+                    },
+                    null,
+                    Shader.TileMode.CLAMP
+            );
+
+            letters.setTypeface(
+                    Typeface.create(
+                            "serif",
+                            Typeface.BOLD
+                    )
+            );
+
+            letters.setTextAlign(
+                    Paint.Align.CENTER
+            );
+
+            letters.setTextSize(61f);
         }
 
         @Override
@@ -681,19 +656,15 @@ public final class BrandLoading {
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
 
-            if (removed || failed) {
-                return;
-            }
-
-            float width = getWidth();
-            float height = getHeight();
-
-            if (width <= 0 || height <= 0) {
+            if (removed ||
+                    getWidth() <= 0 ||
+                    getHeight() <= 0) {
                 return;
             }
 
             boolean animated =
-                    ValueAnimator.areAnimatorsEnabled();
+                    ValueAnimator.areAnimatorsEnabled() &&
+                    !failed;
 
             long elapsed =
                     SystemClock.uptimeMillis() - started;
@@ -703,149 +674,355 @@ public final class BrandLoading {
                       (Math.PI * 2.0 / CYCLE_MS)
                     : 0.0;
 
-            float density =
-                    getResources()
-                            .getDisplayMetrics().density;
-
-            /*
-             * Шаг в экранных пикселях:
-             * меньше лишних точек на плотных экранах.
-             */
-            float sampleStep =
-                    Math.max(2f, density * 1.5f);
-
-            paint.setStrokeCap(
-                    Paint.Cap.ROUND
+            float scale = Math.min(
+                    getWidth() / SCENE_WIDTH,
+                    getHeight() / SCENE_HEIGHT
             );
 
-            paint.setStrokeJoin(
-                    Paint.Join.ROUND
+            canvas.save();
+
+            canvas.translate(
+                    (getWidth() - SCENE_WIDTH * scale) / 2f,
+                    (getHeight() - SCENE_HEIGHT * scale) / 2f
             );
 
-            for (int layer = 2; layer >= 0; layer--) {
-                float amplitude = height *
-                        (0.16f - layer * 0.025f);
+            canvas.scale(scale, scale);
 
-                /*
-                 * Более прозрачные волны движутся
-                 * с небольшим сдвигом относительно главной.
-                 */
-                double offset = layer * 0.72;
+            drawGlow(canvas);
+            drawParticles(canvas, phase);
+            drawShadow(canvas, phase);
+            drawCoin(canvas, phase);
+            drawWaves(canvas, phase);
 
-                // Мягкая полупрозрачная заливка под волной.
-                buildWave(
-                        width, height,
-                        sampleStep, amplitude,
-                        phase, offset
-                );
-
-                path.lineTo(width, height * 0.90f);
-                path.lineTo(0f, height * 0.90f);
-                path.close();
-
-                paint.setStyle(
-                        Paint.Style.FILL
-                );
-
-                paint.setColor(GOLD);
-                paint.setAlpha(
-                        layer == 0 ? 12 : 6
-                );
-
-                canvas.drawPath(path, paint);
-
-                // Тонкий золотой контур.
-                buildWave(
-                        width, height,
-                        sampleStep, amplitude,
-                        phase, offset
-                );
-
-                paint.setStyle(
-                        Paint.Style.STROKE
-                );
-
-                paint.setAlpha(
-                        layer == 0
-                                ? 235
-                                : layer == 1 ? 110 : 55
-                );
-
-                paint.setStrokeWidth(
-                        density *
-                        (layer == 0 ? 1.8f : 1.0f)
-                );
-
-                canvas.drawPath(path, paint);
-            }
+            canvas.restore();
 
             /*
-             * Планируем рисование следующего кадра,
-             * только пока экран действительно виден.
+             * Ограничиваем запрос перерисовки
+             * примерно 30 кадрами в секунду.
+             *
+             * В фоне и при скрытом View новые кадры
+             * не запрашиваются.
              */
-            if (
-                    animated &&
+            if (animated &&
                     !removed &&
                     isAttachedToWindow() &&
                     isShown() &&
-                    getWindowVisibility() == View.VISIBLE
-            ) {
-                postInvalidateOnAnimation();
+                    getWindowVisibility() == View.VISIBLE) {
+                postInvalidateDelayed(33L);
             }
         }
 
-        private void buildWave(
-                float width,
-                float height,
-                float sampleStep,
-                float amplitude,
-                double phase,
-                double offset
-        ) {
-            path.reset();
+        private void resetPaint() {
+            paint.setShader(null);
+            paint.setAlpha(255);
+            paint.setStyle(Paint.Style.FILL);
+            paint.setStrokeWidth(1f);
+        }
 
-            int samples = Math.max(
-                    2,
-                    (int) Math.ceil(width / sampleStep)
+        private void drawGlow(Canvas canvas) {
+            resetPaint();
+            paint.setShader(glow);
+
+            canvas.drawCircle(
+                    180f, 122f, 133f, paint
             );
+
+            paint.setShader(null);
+        }
+
+        private void drawParticles(
+                Canvas canvas,
+                double phase
+        ) {
+            resetPaint();
+            paint.setColor(GOLD);
+
+            for (int i = 0; i < 14; i++) {
+                double offset =
+                        i * Math.PI * 2.0 / 14.0;
+
+                double angle = phase + offset;
+
+                float radius =
+                        100f + (i % 3) * 10f;
+
+                float x = 180f +
+                        (float) Math.cos(angle) * radius;
+
+                float y = 123f +
+                        (float) Math.sin(angle) *
+                        (75f + (i % 4) * 6f);
+
+                float brightness =
+                        0.5f +
+                        0.5f * (float) Math.sin(
+                                phase * 2.0 + offset
+                        );
+
+                paint.setAlpha(
+                        35 + (int) (brightness * 115f)
+                );
+
+                float size =
+                        i % 4 == 0 ? 1.8f : 1.1f;
+
+                canvas.drawCircle(x, y, size, paint);
+            }
+
+            paint.setAlpha(255);
+        }
+
+        private void drawShadow(
+                Canvas canvas,
+                double phase
+        ) {
+            resetPaint();
+
+            float widthScale =
+                    0.88f +
+                    0.04f * (float) Math.sin(phase);
+
+            canvas.save();
+            canvas.scale(
+                    widthScale,
+                    0.18f,
+                    180f,
+                    222f
+            );
+
+            paint.setShader(shadow);
+
+            canvas.drawCircle(
+                    180f, 222f, 92f, paint
+            );
+
+            canvas.restore();
+            paint.setShader(null);
+        }
+
+        private void drawCoin(
+                Canvas canvas,
+                double phase
+        ) {
+            float lift =
+                    (float) Math.sin(phase) * 4f;
+
+            float tilt =
+                    (float) Math.sin(phase) * 3.5f;
+
+            float perspective =
+                    0.93f +
+                    (float) Math.cos(phase) * 0.025f;
+
+            canvas.save();
+
+            canvas.translate(0f, lift);
+
+            canvas.rotate(
+                    tilt,
+                    180f,
+                    118f
+            );
+
+            canvas.scale(
+                    1f,
+                    perspective,
+                    180f,
+                    118f
+            );
+
+            // Нижний край: имитация толщины.
+            resetPaint();
+            paint.setColor(
+                    Color.rgb(86, 57, 17)
+            );
+
+            canvas.drawCircle(
+                    180f, 125f, 79f, paint
+            );
+
+            // Основное металлическое кольцо.
+            paint.setShader(metal);
+
+            canvas.drawCircle(
+                    180f, 118f, 79f, paint
+            );
+
+            // Тёмная внутренняя поверхность.
+            paint.setShader(darkMetal);
+
+            canvas.drawCircle(
+                    180f, 118f, 71f, paint
+            );
+
+            paint.setShader(null);
+
+            // Внутренняя тонкая окантовка.
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(0.9f);
+            paint.setColor(
+                    Color.rgb(202, 164, 67)
+            );
+            paint.setAlpha(155);
+
+            canvas.drawCircle(
+                    180f, 118f, 65f, paint
+            );
+
+            // Мягкий свет на верхнем краю.
+            paint.setStrokeWidth(1.8f);
+            paint.setColor(
+                    Color.rgb(255, 237, 179)
+            );
+            paint.setAlpha(190);
+
+            canvas.drawArc(
+                    102f, 40f,
+                    258f, 196f,
+                    205f, 102f,
+                    false,
+                    paint
+            );
+
+            // Сдержанный движущийся блик.
+            float glintAngle =
+                    -100f +
+                    (float) Math.sin(phase) * 28f;
+
+            paint.setStrokeWidth(3f);
+            paint.setAlpha(170);
+
+            canvas.drawArc(
+                    104f, 42f,
+                    256f, 194f,
+                    glintAngle, 21f,
+                    false,
+                    paint
+            );
+
+            // Тень букв создаёт эффект рельефа.
+            letters.setShader(null);
+            letters.setColor(
+                    Color.rgb(5, 6, 8)
+            );
+
+            float baseline = 118f -
+                    (letters.ascent() + letters.descent()) / 2f;
+
+            canvas.drawText(
+                    "ЛВ",
+                    181.5f,
+                    baseline + 2.5f,
+                    letters
+            );
+
+            // Золотые буквы.
+            letters.setShader(letterGold);
+
+            canvas.drawText(
+                    "ЛВ",
+                    180f,
+                    baseline,
+                    letters
+            );
+
+            letters.setShader(null);
+
+            // Небольшая декоративная точка.
+            resetPaint();
+            paint.setColor(GOLD);
+
+            canvas.drawCircle(
+                    180f, 169f, 1.8f, paint
+            );
+
+            canvas.restore();
+            resetPaint();
+        }
+
+        private void drawWaves(
+                Canvas canvas,
+                double phase
+        ) {
+            for (int layer = 2; layer >= 0; layer--) {
+                buildWave(phase, layer);
+
+                wavePath.lineTo(348f, 286f);
+                wavePath.lineTo(12f, 286f);
+                wavePath.close();
+
+                resetPaint();
+                paint.setColor(GOLD);
+                paint.setAlpha(
+                        layer == 0 ? 13 : 6
+                );
+
+                canvas.drawPath(wavePath, paint);
+
+                buildWave(phase, layer);
+
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeCap(Paint.Cap.ROUND);
+                paint.setStrokeJoin(Paint.Join.ROUND);
+                paint.setStrokeWidth(
+                        layer == 0 ? 1.7f : 0.9f
+                );
+
+                paint.setAlpha(
+                        layer == 0 ? 220 :
+                        layer == 1 ? 95 : 45
+                );
+
+                canvas.drawPath(wavePath, paint);
+            }
+
+            resetPaint();
+        }
+
+        private void buildWave(
+                double phase,
+                int layer
+        ) {
+            wavePath.reset();
+
+            final int samples = 112;
 
             for (int i = 0; i <= samples; i++) {
                 float fraction =
                         (float) i / samples;
 
-                float x = fraction * width;
+                float x =
+                        12f + fraction * 336f;
 
-                /*
-                 * Края волны остаются спокойными,
-                 * основное движение — в середине.
-                 */
-                double envelope = Math.sin(
-                        Math.PI * fraction
-                );
+                double envelope =
+                        Math.sin(Math.PI * fraction);
 
                 double primary = Math.sin(
-                        fraction * Math.PI * 3.0
-                                - phase
-                                + offset
+                        fraction * Math.PI * 3.0 -
+                        phase +
+                        layer * 0.75
                 );
 
                 double secondary = Math.sin(
-                        fraction * Math.PI * 5.0
-                                - phase * 2.0
-                                + offset
-                ) * 0.15;
+                        fraction * Math.PI * 5.0 -
+                        phase * 2.0 +
+                        layer
+                ) * 0.16;
 
-                float y = height * 0.48f +
+                float amplitude =
+                        13f - layer * 2.4f;
+
+                float y = 263f +
                         (float) (
                                 (primary + secondary) *
-                                amplitude *
-                                envelope
+                                envelope *
+                                amplitude
                         );
 
                 if (i == 0) {
-                    path.moveTo(x, y);
+                    wavePath.moveTo(x, y);
                 } else {
-                    path.lineTo(x, y);
+                    wavePath.lineTo(x, y);
                 }
             }
         }
