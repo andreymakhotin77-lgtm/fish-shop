@@ -1,0 +1,268 @@
+name: Connect product motion
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Connect product animations safely
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          store_path = Path("android/StoreActivity.java")
+          motion_path = Path("android/ProductMotion.java")
+
+          for path in (store_path, motion_path):
+              if not path.is_file():
+                  raise SystemExit(f"Missing file: {path}")
+              if not path.read_text(encoding="utf-8").strip():
+                  raise SystemExit(f"Empty file: {path}")
+
+          source = store_path.read_text(encoding="utf-8")
+          motion = motion_path.read_text(encoding="utf-8")
+
+          if "public final class ProductMotion" not in motion:
+              raise SystemExit(
+                  "Unexpected ProductMotion.java. No files changed."
+              )
+
+          marker = "// LAVKA_PRODUCT_MOTION_V1"
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{label}: expected 1 match, found {count}. "
+                      "No files changed."
+                  )
+              return text.replace(old, new, 1)
+
+          if marker not in source:
+              source = replace_once(
+                  source,
+                  "public class StoreActivity extends Activity {",
+                  "\n".join([
+                      "public class StoreActivity extends Activity {",
+                      "    // LAVKA_PRODUCT_MOTION_V1",
+                      "    private ProductMotion productMotion;",
+                      "",
+                      "    private void playProductFlight(",
+                      "            ProductMotion.Flight flight",
+                      "    ) {",
+                      "        if (flight == null) return;",
+                      "",
+                      "        if (destroyed || navigation == null) {",
+                      "            flight.release();",
+                      "            return;",
+                      "        }",
+                      "",
+                      "        navigation.post(() -> {",
+                      "            if (destroyed ||",
+                      "                    productMotion == null ||",
+                      "                    !hasWindowFocus() ||",
+                      "                    navigation.getChildCount() <= 3) {",
+                      "                flight.release();",
+                      "                return;",
+                      "            }",
+                      "",
+                      "            productMotion.play(",
+                      "                    flight,",
+                      "                    navigation.getChildAt(3)",
+                      "            );",
+                      "        });",
+                      "    }",
+                  ]),
+                  "StoreActivity class"
+              )
+
+              source = replace_once(
+                  source,
+                  "        api = new ShopApi();",
+                  "\n".join([
+                      "        api = new ShopApi();",
+                      "        productMotion = new ProductMotion(this);",
+                  ]),
+                  "Motion initialization"
+              )
+
+              source = replace_once(
+                  source,
+                  "\n".join([
+                      "        quantityControls(card, p);",
+                      "        return card;",
+                  ]),
+                  "\n".join([
+                      "        quantityControls(card, p);",
+                      "        productMotion.bind(p.id, card, photo);",
+                      "        return card;",
+                  ]),
+                  "Product card binding"
+              )
+
+              old_quantity = """    private boolean changeQuantity(Product p, int direction) {
+                  if (busyCart()) {
+                      message(
+                              "Корзина",
+                              "Сначала завершите проверку или " +
+                              "проверьте неподтверждённый заказ."
+                      );
+                      return false;
+                  }
+
+                  int current = halves(p.id);
+                  int step = kg(p) ? 1 : 2;
+                  int next = step == 2 && current % 2 != 0
+                          ? current + (direction > 0 ? 1 : -1)
+                          : current + direction * step;
+
+                  if (next > 100) {
+                      message("Количество", "Можно выбрать до 50 " + p.unit + ".");
+                      return false;
+                  }
+                  if (next <= 0) cart.remove(p.id);
+                  else cart.put(p.id, next);
+
+                  saveCart();
+                  redraw();
+                  return true;
+              }"""
+
+              new_quantity = old_quantity.replace(
+                  "        if (next <= 0) cart.remove(p.id);",
+                  "\n".join([
+                      "        ProductMotion.Flight motionFlight =",
+                      "                direction > 0",
+                      "                        ? productMotion.prepare(p.id)",
+                      "                        : null;",
+                      "",
+                      "        if (next <= 0) cart.remove(p.id);",
+                  ]),
+                  1
+              ).replace(
+                  "        redraw();\n        return true;",
+                  "\n".join([
+                      "        redraw();",
+                      "        playProductFlight(motionFlight);",
+                      "        return true;",
+                  ]),
+                  1
+              )
+
+              source = replace_once(
+                  source,
+                  old_quantity,
+                  new_quantity,
+                  "Quantity controls"
+              )
+
+              old_detail = "\n".join([
+                  "            cart.put(p.id, next);",
+                  "            saveCart();",
+                  "            dialog.dismiss();",
+                  "            redraw();",
+              ])
+
+              new_detail = "\n".join([
+                  "            ProductMotion.Flight motionFlight =",
+                  "                    productMotion.prepare(photo);",
+                  "",
+                  "            cart.put(p.id, next);",
+                  "            saveCart();",
+                  "            dialog.dismiss();",
+                  "            redraw();",
+                  "            playProductFlight(motionFlight);",
+              ])
+
+              source = replace_once(
+                  source,
+                  old_detail,
+                  new_detail,
+                  "Product detail add button"
+              )
+
+              source = replace_once(
+                  source,
+                  "        super.onPause();",
+                  "\n".join([
+                      "        if (productMotion != null) {",
+                      "            productMotion.stopFlight();",
+                      "        }",
+                      "        super.onPause();",
+                  ]),
+                  "Pause lifecycle"
+              )
+
+              source = replace_once(
+                  source,
+                  "        if (api != null) api.close();",
+                  "\n".join([
+                      "        if (productMotion != null) {",
+                      "            productMotion.close();",
+                      "        }",
+                      "        if (api != null) api.close();",
+                  ]),
+                  "Destroy lifecycle"
+              )
+
+          required = [
+              marker,
+              "private ProductMotion productMotion;",
+              "productMotion = new ProductMotion(this);",
+              "productMotion.bind(p.id, card, photo);",
+              "productMotion.prepare(p.id)",
+              "productMotion.prepare(photo)",
+              "private void playProductFlight(",
+              "productMotion.stopFlight();",
+              "productMotion.close();",
+          ]
+
+          for fragment in required:
+              if fragment not in source:
+                  raise SystemExit(
+                      "Integration verification failed: "
+                      f"{fragment}. No files changed."
+                  )
+
+          if source.count("playProductFlight(motionFlight);") != 2:
+              raise SystemExit(
+                  "Unexpected number of flight hooks. No files changed."
+              )
+
+          store_path.write_text(source, encoding="utf-8")
+          print("Product motion connected successfully.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add android/StoreActivity.java
+
+          if git diff --cached --quiet; then
+            echo "Product motion is already connected"
+          else
+            git commit -m "Connect product tilt and cart flight effects"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
