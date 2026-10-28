@@ -33,6 +33,11 @@ import java.time.LocalTime;
 import java.util.*;
 
 public class StoreActivity extends Activity {
+    // LAVKA_CAT_HOME_CHECK_V1
+    protected boolean isHomeForCat() {
+        return tab == 0 && !destroyed;
+    }
+
     // LAVKA_PRODUCT_MOTION_V1
     private ProductMotion productMotion;
     private int productFlightGeneration;

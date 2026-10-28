@@ -49,6 +49,8 @@ public class MainActivity extends StoreActivity {
 
     // LAVKA_CAT_WELCOME_V1
     private CatWelcome catWelcome;
+    // LAVKA_RUNNING_CAT_V1
+    private boolean catPlayedThisVisit;
 
     private FrameLayout gate;
     private TextView gateTitle;
@@ -445,18 +447,6 @@ public class MainActivity extends StoreActivity {
             );
         }
 
-        if (CatWelcome.shouldShow(this)) {
-            catWelcome = new CatWelcome(
-                    this,
-                    () -> {
-                        catWelcome = null;
-                        startBuyerServices();
-                    }
-            );
-            catWelcome.start();
-            return;
-        }
-
         startBuyerServices();
     }
 
@@ -591,7 +581,7 @@ public class MainActivity extends StoreActivity {
         resumed = false;
 
         if (catWelcome != null) {
-            catWelcome.finish();
+            catWelcome.dispose();
             catWelcome = null;
         }
 
@@ -600,6 +590,8 @@ public class MainActivity extends StoreActivity {
 
     @Override
     protected void onStop() {
+        catPlayedThisVisit = false;
+
         /*
          * Закрываем окна настроек при уходе в фон,
          * чтобы они не оставались поверх экрана входа.
@@ -656,13 +648,18 @@ public class MainActivity extends StoreActivity {
     // ==================== УВЕДОМЛЕНИЯ ====================
 
     private void startBuyerServices() {
-        if (catWelcome != null &&
-                catWelcome.isBlocking()) {
+        if (!resumed || !unlocked || closing) {
             return;
         }
 
-        if (!resumed || !unlocked || closing) {
-            return;
+        if (!catPlayedThisVisit &&
+                CatWelcome.shouldShow(this)) {
+            catPlayedThisVisit = true;
+            catWelcome = new CatWelcome(
+                    this,
+                    () -> catWelcome = null
+            );
+            catWelcome.start();
         }
 
         if (orderPush == null) {
