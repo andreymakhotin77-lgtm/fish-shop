@@ -1,0 +1,246 @@
+name: Clean interface text
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update interface text
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          store_path = Path("android/StoreActivity.java")
+          settings_path = Path("android/ShopSettings.java")
+
+          def fail(message):
+              raise SystemExit(message + " No files changed.")
+
+          if not store_path.is_file():
+              fail("StoreActivity.java missing.")
+
+          if not settings_path.is_file():
+              fail("ShopSettings.java missing.")
+
+          store = store_path.read_text(encoding="utf-8")
+          settings = settings_path.read_text(encoding="utf-8")
+
+          def replace_once(source, old, new, label):
+              parts = re.split(r"(\s+)", old.strip())
+
+              pattern = "".join(
+                  r"\s+" if part.isspace()
+                  else re.escape(part)
+                  for part in parts
+                  if part
+              )
+
+              matches = list(re.finditer(pattern, source))
+
+              if len(matches) != 1:
+                  fail(
+                      label + ": expected one match, found " +
+                      str(len(matches)) + "."
+                  )
+
+              match = matches[0]
+
+              return (
+                  source[:match.start()] +
+                  new +
+                  source[match.end():]
+              )
+
+          def edit_section(source, start, end, editor):
+              if source.count(start) != 1:
+                  fail("Section start differs: " + start)
+
+              if source.count(end) != 1:
+                  fail("Section end differs: " + end)
+
+              first = source.index(start)
+              last = source.index(end)
+
+              if last <= first:
+                  fail("Unexpected section order.")
+
+              section = source[first:last]
+              changed = editor(section)
+
+              return source[:first] + changed + source[last:]
+
+          store_marker = "// LAVKA_CLEAN_STORE_TEXT_V1"
+          settings_marker = "// LAVKA_CLEAN_SETTINGS_TEXT_V1"
+
+          def clean_home(section):
+              section = replace_once(
+                  section,
+                  '''
+                  deliveryText.addView(text(
+                      "Макеевка · Донецк · Харцызск", 12, MUTED
+                  ));
+                  ''',
+                  "",
+                  "Home city subtitle"
+              )
+
+              section = replace_once(
+                  section,
+                  '''
+                  deliveryCard.addView(text(
+                      "Другие города и меньшая сумма — по согласованию.",
+                      12, MUTED
+                  ));
+                  ''',
+                  "",
+                  "Home delivery disclaimer"
+              )
+
+              if '"Доставка бесплатно от 2 000 ₽"' not in section:
+                  fail("Delivery heading missing.")
+
+              return section
+
+          def clean_profile(section):
+              return replace_once(
+                  section,
+                  "conditions.addView(text(DELIVERY, 13, MUTED));",
+                  "",
+                  "Profile delivery text"
+              )
+
+          def clean_settings(section):
+              section = replace_once(
+                  section,
+                  r'''
+                  description(
+                      activity,
+                      body,
+                      "Лавка Вкуса\nВерсия: " +
+                          version(activity) +
+                          "\n\nОплата при получении."
+                  );
+                  ''',
+                  (
+                      'description(activity, body, '
+                      '"Лавка Вкуса\\nВерсия: " + '
+                      'version(activity));'
+                  ),
+                  "About application text"
+              )
+
+              section = replace_once(
+                  section,
+                  '''
+                  description(
+                      activity,
+                      body,
+                      "Не удаляйте приложение для обновления: " +
+                          "при удалении можно потерять локальную " +
+                          "историю и ключи просмотра заказов."
+                  );
+                  ''',
+                  "",
+                  "Settings uninstall warning"
+              )
+
+              return section
+
+          if store_marker not in store:
+              updated_store = edit_section(
+                  store,
+                  "private void showHome() {",
+                  "private List<String> categories() {",
+                  clean_home
+              )
+
+              updated_store = edit_section(
+                  updated_store,
+                  "private void showProfile() {",
+                  "private String statusName(String value) {",
+                  clean_profile
+              )
+
+              # Checkout delivery terms must remain unchanged.
+              checkout_line = (
+                  "summary.addView(text(DELIVERY, 13, MUTED));"
+              )
+
+              if store.count(checkout_line) != 1:
+                  fail("Unexpected checkout delivery structure.")
+
+              if updated_store.count(checkout_line) != 1:
+                  fail("Checkout delivery text was affected.")
+
+              updated_store = store_marker + "\n" + updated_store
+          else:
+              updated_store = store
+              print("Store text already updated.")
+
+          if settings_marker not in settings:
+              if "LAVKA_FULLSCREEN_SETTINGS_V1" not in settings:
+                  fail("Expected fullscreen settings file.")
+
+              updated_settings = edit_section(
+                  settings,
+                  "private static void mainContent(",
+                  "private static void delayContent(",
+                  clean_settings
+              )
+
+              updated_settings = (
+                  settings_marker + "\n" + updated_settings
+              )
+          else:
+              updated_settings = settings
+              print("Settings text already updated.")
+
+          # Both files are written only after all checks pass.
+          if updated_store != store:
+              store_path.write_text(
+                  updated_store,
+                  encoding="utf-8"
+              )
+
+          if updated_settings != settings:
+              settings_path.write_text(
+                  updated_settings,
+                  encoding="utf-8"
+              )
+
+          print("SUCCESS: requested interface text updated.")
+          print("Checkout delivery rules unchanged.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          if git diff --quiet -- android/StoreActivity.java android/ShopSettings.java; then
+            echo "No new changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android/StoreActivity.java android/ShopSettings.java
+            git commit -m "Simplify home profile and settings text"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
