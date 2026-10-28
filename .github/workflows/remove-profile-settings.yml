@@ -27,78 +27,98 @@ jobs:
           store = Path("android/StoreActivity.java")
           settings = Path("android/ShopSettings.java")
 
+          def fail(message):
+              raise SystemExit(message + " No files changed.")
+
           if not store.is_file() or not settings.is_file():
-              raise SystemExit(
-                  "Required Java file missing. No files changed."
-              )
+              fail("Required Java file missing.")
 
           source = store.read_text(encoding="utf-8")
           settings_source = settings.read_text(encoding="utf-8")
 
           if "LAVKA_FULLSCREEN_SETTINGS_V1" not in settings_source:
-              raise SystemExit(
-                  "Update ShopSettings.java first. No files changed."
-              )
+              fail("Update ShopSettings.java first.")
 
-          if source.count("// LAVKA_SETTINGS_GEAR_V1") != 1:
-              raise SystemExit(
-                  "Header gear not found uniquely. No files changed."
-              )
-
-          block = '''        // LAVKA_SHOP_SETTINGS_LINK
-                  content.addView(secondary(
-                          "Настройки приложения  ›",
-                          () -> {
-                              if (this instanceof MainActivity) {
-                                  ((MainActivity) this).openShopSettings();
-                              }
-                          }
-                  ));
-          '''
-
-          # Remove YAML indentation from the embedded Java block.
-          # The first line has 8 Java spaces; following lines
-          # above deliberately include 8 additional spaces.
-          lines = block.splitlines(keepends=True)
-          block = lines[0] + "".join(
-              line[8:] if line.startswith("        ") else line
-              for line in lines[1:]
-          )
-
+          gear = "// LAVKA_SETTINGS_GEAR_V1"
           marker = "// LAVKA_SHOP_SETTINGS_LINK"
+          profile = "private void showProfile() {"
+          greeting = "LinearLayout greeting = panel();"
+
+          if source.count(gear) != 1:
+              fail("Header gear not found uniquely.")
 
           if marker not in source:
               if source.count(".openShopSettings();") != 1:
-                  raise SystemExit(
-                      "Unexpected settings links. No files changed."
-                  )
-              print("Profile link already removed; header gear remains.")
+                  fail("Unexpected settings links.")
+
+              print("Already updated. Header gear remains.")
               raise SystemExit(0)
 
-          if source.count(block) != 1:
-              raise SystemExit(
-                  "Profile block differs. No files changed."
-              )
+          if source.count(marker) != 1:
+              fail("Profile marker is not unique.")
 
-          updated = source.replace(block, "", 1)
+          if source.count(profile) != 1:
+              fail("Profile method is not unique.")
+
+          marker_at = source.index(marker)
+          profile_at = source.index(profile)
+
+          if marker_at <= profile_at:
+              fail("Settings marker is outside expected profile area.")
+
+          start = source.rfind("\n", 0, marker_at) + 1
+
+          if source[start:marker_at].strip():
+              fail("Unexpected text before settings marker.")
+
+          greeting_at = source.find(greeting, marker_at)
+
+          if greeting_at < 0:
+              fail("Profile greeting not found.")
+
+          end = source.rfind("\n", 0, greeting_at) + 1
+
+          if source[end:greeting_at].strip():
+              fail("Unexpected text before profile greeting.")
+
+          expected = (
+              '// LAVKA_SHOP_SETTINGS_LINK\n'
+              'content.addView(secondary(\n'
+              '"Настройки приложения  ›",\n'
+              '() -> {\n'
+              'if (this instanceof MainActivity) {\n'
+              '((MainActivity) this).openShopSettings();\n'
+              '}\n'
+              '}\n'
+              '));\n'
+          )
+
+          def normalized(value):
+              return "".join(value.split())
+
+          candidate = source[start:end]
+
+          if normalized(candidate) != normalized(expected):
+              fail("Profile settings code differs from expected.")
+
+          updated = source[:start] + source[end:]
 
           if marker in updated:
-              raise SystemExit(
-                  "Profile marker remains. No files changed."
-              )
+              fail("Profile marker remains.")
+
+          if updated.count(gear) != 1:
+              fail("Header gear verification failed.")
 
           if updated.count(".openShopSettings();") != 1:
-              raise SystemExit(
-                  "Unexpected remaining links. No files changed."
-              )
+              fail("Unexpected remaining settings links.")
 
-          if updated.count("// LAVKA_SETTINGS_GEAR_V1") != 1:
-              raise SystemExit(
-                  "Gear verification failed. No files changed."
-              )
+          if updated.count(profile) != 1:
+              fail("Profile method verification failed.")
 
           store.write_text(updated, encoding="utf-8")
-          print("Profile settings entry removed; header gear preserved.")
+
+          print("SUCCESS: profile settings link removed.")
+          print("Header gear preserved.")
           PY
 
       - name: Save changes
@@ -110,7 +130,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add android/StoreActivity.java
-            git commit -m "Keep settings in header gear only"
+            git commit -m "Remove duplicate profile settings link"
             git push origin HEAD:main
           fi
 
