@@ -1,0 +1,149 @@
+name: Connect delivery animation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Connect animation safely
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          store_path = Path("android/StoreActivity.java")
+          animation_path = Path(
+              "android/DeliveryTruckAnimation.java"
+          )
+
+          def fail(message):
+              raise SystemExit(
+                  message + " No files changed."
+              )
+
+          if not store_path.is_file():
+              fail("StoreActivity.java missing.")
+
+          if not animation_path.is_file():
+              fail("DeliveryTruckAnimation.java missing.")
+
+          source = store_path.read_text(
+              encoding="utf-8"
+          )
+
+          animation = animation_path.read_text(
+              encoding="utf-8"
+          )
+
+          if (
+              "public final class DeliveryTruckAnimation"
+              not in animation
+          ):
+              fail("Unexpected animation file.")
+
+          marker = "// LAVKA_DELIVERY_TRUCK_V1"
+          call = (
+              "DeliveryTruckAnimation.install(deliveryCard);"
+          )
+
+          if marker in source:
+              if source.count(call) != 1:
+                  fail("Existing connection differs.")
+
+              print("Animation already connected.")
+              raise SystemExit(0)
+
+          if call in source:
+              fail("Unmarked animation connection found.")
+
+          start = "private void showHome() {"
+          end = "private List<String> categories() {"
+
+          if source.count(start) != 1:
+              fail("Home method differs.")
+
+          if source.count(end) != 1:
+              fail("Categories method differs.")
+
+          first = source.index(start)
+          last = source.index(end)
+
+          if last <= first:
+              fail("Unexpected method order.")
+
+          home = source[first:last]
+
+          anchor = "deliveryCard.addView(deliveryRow);"
+
+          if home.count(anchor) != 1:
+              fail("Delivery card structure differs.")
+
+          if (
+              '"Доставка бесплатно от 2 000 ₽"'
+              not in home
+          ):
+              fail("Delivery heading differs.")
+
+          if "deliveryCard.setOnClickListener" in home:
+              fail("Delivery card already has an action.")
+
+          replacement = (
+              anchor + "\n\n"
+              "        " + marker + "\n"
+              "        " + call
+          )
+
+          updated_home = home.replace(
+              anchor,
+              replacement,
+              1
+          )
+
+          updated = (
+              source[:first] +
+              updated_home +
+              source[last:]
+          )
+
+          if updated.count(call) != 1:
+              fail("Animation connection check failed.")
+
+          store_path.write_text(
+              updated,
+              encoding="utf-8"
+          )
+
+          print("SUCCESS: delivery animation connected.")
+          print("Other application logic unchanged.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          if git diff --quiet -- android/StoreActivity.java; then
+            echo "No new changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android/StoreActivity.java
+            git commit -m "Connect gold delivery truck animation"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
