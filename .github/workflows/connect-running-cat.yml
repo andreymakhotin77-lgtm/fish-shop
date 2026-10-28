@@ -1,0 +1,177 @@
+name: Connect running cat
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update cat connection
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          main_path = Path("android/MainActivity.java")
+          store_path = Path("android/StoreActivity.java")
+          cat_path = Path("android/CatWelcome.java")
+
+          def fail(message):
+              raise SystemExit(message + " No files changed.")
+
+          for p in (main_path, store_path, cat_path):
+              if not p.is_file():
+                  fail("Missing file: " + str(p))
+
+          main = main_path.read_text(encoding="utf-8")
+          store = store_path.read_text(encoding="utf-8")
+          cat = cat_path.read_text(encoding="utf-8")
+
+          marker = "// LAVKA_RUNNING_CAT_V1"
+
+          if marker in main:
+              print("Running cat already connected.")
+              raise SystemExit(0)
+
+          if "// LAVKA_CAT_WELCOME_V1" not in main:
+              fail("Expected previous cat connection.")
+
+          if "host.getOverlay().add(scene);" not in cat:
+              fail("Replace CatWelcome.java first.")
+
+          def replace_once(source, old, new, label):
+              if source.count(old) != 1:
+                  fail("Structure differs: " + label)
+              return source.replace(old, new, 1)
+
+          old_intro = (
+              "        if (CatWelcome.shouldShow(this)) {\n"
+              "            catWelcome = new CatWelcome(\n"
+              "                    this,\n"
+              "                    () -> {\n"
+              "                        catWelcome = null;\n"
+              "                        startBuyerServices();\n"
+              "                    }\n"
+              "            );\n"
+              "            catWelcome.start();\n"
+              "            return;\n"
+              "        }\n\n"
+          )
+
+          main = replace_once(
+              main, old_intro, "",
+              "Old welcome block"
+          )
+
+          old_guard = (
+              "        if (catWelcome != null &&\n"
+              "                catWelcome.isBlocking()) {\n"
+              "            return;\n"
+              "        }\n\n"
+          )
+
+          main = replace_once(
+              main, old_guard, "",
+              "Old blocking guard"
+          )
+
+          main = replace_once(
+              main,
+              "    private CatWelcome catWelcome;",
+              (
+                  "    private CatWelcome catWelcome;\n"
+                  "    " + marker + "\n"
+                  "    private boolean catPlayedThisVisit;"
+              ),
+              "Cat fields"
+          )
+
+          main = replace_once(
+              main,
+              "        if (orderPush == null) {",
+              (
+                  "        if (!catPlayedThisVisit &&\n"
+                  "                CatWelcome.shouldShow(this)) {\n"
+                  "            catPlayedThisVisit = true;\n"
+                  "            catWelcome = new CatWelcome(\n"
+                  "                    this,\n"
+                  "                    () -> catWelcome = null\n"
+                  "            );\n"
+                  "            catWelcome.start();\n"
+                  "        }\n\n"
+                  "        if (orderPush == null) {"
+              ),
+              "Start buyer services"
+          )
+
+          main = replace_once(
+              main,
+              "    protected void onStop() {",
+              (
+                  "    protected void onStop() {\n"
+                  "        catPlayedThisVisit = false;\n"
+              ),
+              "Foreground visit reset"
+          )
+
+          main = replace_once(
+              main,
+              "            catWelcome.finish();",
+              "            catWelcome.dispose();",
+              "Pause cleanup"
+          )
+
+          class_anchor = (
+              "public class StoreActivity extends Activity {"
+          )
+
+          store = replace_once(
+              store,
+              class_anchor,
+              (
+                  class_anchor + "\n"
+                  "    // LAVKA_CAT_HOME_CHECK_V1\n"
+                  "    protected boolean isHomeForCat() {\n"
+                  "        return tab == 0 && !destroyed;\n"
+                  "    }\n"
+              ),
+              "Home screen check"
+          )
+
+          # Write only after both files pass all checks.
+          main_path.write_text(main, encoding="utf-8")
+          store_path.write_text(store, encoding="utf-8")
+
+          print("SUCCESS: cat now runs over the home screen.")
+          print("Separate welcome screen removed.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          if git diff --quiet -- android/MainActivity.java android/StoreActivity.java; then
+            echo "No new changes."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add android/MainActivity.java android/StoreActivity.java
+            git commit -m "Run cat over home screen on app opening"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
