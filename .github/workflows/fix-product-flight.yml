@@ -1,0 +1,213 @@
+name: Fix product flight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Fix flight after product dialog
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("android/StoreActivity.java")
+
+          if not path.is_file():
+              raise SystemExit("StoreActivity.java not found.")
+
+          source = path.read_text(encoding="utf-8")
+          marker = "// LAVKA_PRODUCT_FLIGHT_FOCUS_FIX_V1"
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"{label}: expected 1 match, found {count}. "
+                      "No files changed."
+                  )
+              return text.replace(old, new, 1)
+
+          if marker not in source:
+              if "// LAVKA_PRODUCT_MOTION_V1" not in source:
+                  raise SystemExit(
+                      "Product motion is not connected. No files changed."
+                  )
+
+              source = replace_once(
+                  source,
+                  "    private ProductMotion productMotion;",
+                  "\n".join([
+                      "    private ProductMotion productMotion;",
+                      "    private int productFlightGeneration;",
+                  ]),
+                  "Motion field"
+              )
+
+              pattern = (
+                  r"(?ms)^    private void playProductFlight\(\n"
+                  r".*?^    \}"
+              )
+
+              matches = list(re.finditer(pattern, source))
+
+              if len(matches) != 1:
+                  raise SystemExit(
+                      "Flight method structure differs. No files changed."
+                  )
+
+              replacement = """    // LAVKA_PRODUCT_FLIGHT_FOCUS_FIX_V1
+              private void playProductFlight(
+                      ProductMotion.Flight flight
+              ) {
+                  if (flight == null) return;
+
+                  if (destroyed || navigation == null) {
+                      flight.release();
+                      return;
+                  }
+
+                  final int generation = productFlightGeneration;
+                  final long deadline =
+                          android.os.SystemClock.uptimeMillis() + 900L;
+
+                  navigation.post(new Runnable() {
+                      @Override
+                      public void run() {
+                          if (destroyed ||
+                                  generation != productFlightGeneration ||
+                                  productMotion == null ||
+                                  navigation == null ||
+                                  isFinishing() ||
+                                  isDestroyed()) {
+                              flight.release();
+                              return;
+                          }
+
+                          if (navigation.getChildCount() > 3) {
+                              View target = navigation.getChildAt(3);
+
+                              boolean ready =
+                                      hasWindowFocus() &&
+                                      navigation.isAttachedToWindow() &&
+                                      target.isShown() &&
+                                      target.getWidth() > 0 &&
+                                      target.getHeight() > 0;
+
+                              if (ready) {
+                                  productMotion.play(flight, target);
+                                  return;
+                              }
+                          }
+
+                          if (android.os.SystemClock.uptimeMillis() >= deadline) {
+                              flight.release();
+                              return;
+                          }
+
+                          boolean queued =
+                                  navigation.postDelayed(this, 32L);
+
+                          if (!queued) {
+                              flight.release();
+                          }
+                      }
+                  });
+              }"""
+
+              match = matches[0]
+
+              source = (
+                  source[:match.start()] +
+                  replacement +
+                  source[match.end():]
+              )
+
+              source = replace_once(
+                  source,
+                  "\n".join([
+                      "        if (productMotion != null) {",
+                      "            productMotion.stopFlight();",
+                      "        }",
+                  ]),
+                  "\n".join([
+                      "        productFlightGeneration++;",
+                      "        if (productMotion != null) {",
+                      "            productMotion.stopFlight();",
+                      "        }",
+                  ]),
+                  "Pause cancellation"
+              )
+
+              source = replace_once(
+                  source,
+                  "\n".join([
+                      "        if (productMotion != null) {",
+                      "            productMotion.close();",
+                      "        }",
+                  ]),
+                  "\n".join([
+                      "        productFlightGeneration++;",
+                      "        if (productMotion != null) {",
+                      "            productMotion.close();",
+                      "        }",
+                  ]),
+                  "Destroy cancellation"
+              )
+
+          required = [
+              marker,
+              "private int productFlightGeneration;",
+              "generation != productFlightGeneration",
+              "navigation.postDelayed(this, 32L)",
+              "productMotion.prepare(photo)",
+          ]
+
+          for fragment in required:
+              if fragment not in source:
+                  raise SystemExit(
+                      "Verification failed. No files changed: " + fragment
+                  )
+
+          if source.count("productFlightGeneration++;") != 2:
+              raise SystemExit(
+                  "Lifecycle verification failed. No files changed."
+              )
+
+          path.write_text(source, encoding="utf-8")
+          print("Flight focus fix applied successfully.")
+          PY
+
+      - name: Save changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add android/StoreActivity.java
+
+          if git diff --cached --quiet; then
+            echo "Fix is already applied"
+          else
+            git commit -m "Wait for window focus before cart flight"
+            git push origin HEAD:main
+          fi
+
+      - name: Start APK build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-apk.yml --ref main
