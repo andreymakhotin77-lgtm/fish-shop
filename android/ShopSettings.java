@@ -1,3 +1,4 @@
+// LAVKA_CLEAN_SETTINGS_TEXT_V1
 package ru.makeevka.fishshop;
 
 import android.app.Activity;
@@ -528,21 +529,9 @@ public final class ShopSettings {
 
         heading(activity, body, "О приложении");
 
-        description(
-                activity,
-                body,
-                "Лавка Вкуса\nВерсия: " +
-                        version(activity) +
-                        "\n\nОплата при получении."
-        );
+        description(activity, body, "Лавка Вкуса\nВерсия: " + version(activity));
 
-        description(
-                activity,
-                body,
-                "Не удаляйте приложение для обновления: " +
-                        "при удалении можно потерять локальную " +
-                        "историю и ключи просмотра заказов."
-        );
+        
 
         addButton(
                 activity,

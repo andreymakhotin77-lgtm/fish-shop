@@ -1,3 +1,4 @@
+// LAVKA_CLEAN_STORE_TEXT_V1
 package ru.makeevka.fishshop;
 
 import android.app.Activity;
@@ -1192,17 +1193,12 @@ public class StoreActivity extends Activity {
         deliveryText.setOrientation(LinearLayout.VERTICAL);
         deliveryText.setPadding(dp(12), 0, 0, 0);
         deliveryText.addView(bold("Доставка бесплатно от 2 000 ₽", 16, WHITE));
-        deliveryText.addView(text(
-                "Макеевка · Донецк · Харцызск", 12, MUTED
-        ));
+        
         deliveryRow.addView(
                 deliveryText, new LinearLayout.LayoutParams(0, -2, 1)
         );
         deliveryCard.addView(deliveryRow);
-        deliveryCard.addView(text(
-                "Другие города и меньшая сумма — по согласованию.",
-                12, MUTED
-        ));
+        
 
         sectionLink("Категории", "Все  →", () -> openCatalog(false));
         categoryTiles();
@@ -2523,7 +2519,7 @@ public class StoreActivity extends Activity {
         ShopContacts.addTo(this, content);
 
         LinearLayout conditions = panel();
-        conditions.addView(text(DELIVERY, 13, MUTED));
+        
         conditions.addView(text(
                 "Даты и интервалы — по московскому времени. " +
                 "Детали заказа подтверждает продавец.",
